@@ -26,6 +26,9 @@ class Node:
     
 def signal_strength(node, distance):
     # TODO: this is a simple model, we should use a more complex model
+    #       things that we can model:
+    #           fading (included here, roughly)
+    #           latency (may be complex, as we need to factor in interference and other nearby nodes)
     return 1 / (1 + distance**2)
 
 # create 10 nodes
