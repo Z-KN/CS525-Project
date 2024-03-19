@@ -36,6 +36,9 @@ def main():
     bluetooth_tx_socket = bind_socket('0.0.0.0', BLUETOOTH_TX_PORT, socket.SOCK_DGRAM)
     bluetooth_rx_socket.listen(1)
     #high_power_socket = bind_socket('0.0.0.0', HIGH_POWER_PORT)
+
+    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,))
+    listen_thread.start()
     
     time_collector = lambda : None
     if sys.version_info[0]==3 and sys.version_info[1] < 8:
@@ -47,10 +50,6 @@ def main():
         if time_collector() - systime >= BLUETOOTH_ADVERTISEMENT_INTERVAL:
             systime = time_collector()
             bluetooth_sender(bluetooth_tx_socket)
-
-    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,))
-    listen_thread.start()
-    listen_thread.join()
 
 def bluetooth_listener(bluetooth_rx_socket):
     """
