@@ -8,8 +8,9 @@ import socket
 from concurrent import futures
 import threading
 
-global BLUETOOTH_PORT
-BLUETOOTH_PORT = 9035
+global BLUETOOTH_RX_PORT
+BLUETOOTH_RX_PORT = 59035
+BLUETOOTH_TX_PORT = 59025
 
 parser=argparse.ArgumentParser()
 parser.add_argument('-a', '--addresses', nargs='+', help='enter addresses of nodes to be broadcasted to', required=True)
@@ -21,25 +22,41 @@ BROADCAST_RECIPIENTS = args.addresses
 MAX_BLUETOOTH_LISTENERS = len(BROADCAST_RECIPIENTS)
 
 def main():
-    bluetooth_socket = bind_socket('0.0.0.0', BLUETOOTH_PORT)
+    bluetooth_rx_socket = bind_socket('0.0.0.0', BLUETOOTH_RX_PORT)
+    bluetooth_tx_socket = bind_socket('0.0.0.0', BLUETOOTH_TX_PORT)
+    
     #high_power_socket = bind_socket('0.0.0.0', HIGH_POWER_PORT)
 
-    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_socket,))
+    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket, bluetooth_tx_socket))
     listen_thread.start()
     listen_thread.join()
 
-def bluetooth_listener(bluetooth_socket):
+def bluetooth_listener(bluetooth_rx_socket, bluetooth_tx_socket):
     bluetooth_listener_pool = futures.ThreadPoolExecutor(max_workers=MAX_BLUETOOTH_LISTENERS)
     while(1):
-        # this future probably needs to be executed, and that's why things aren't working now. fix later
-        tx_data, tx_address = bluetooth_socket.recvfrom(1024)
-        bluetooth_listener_pool.submit(bluetooth_process_advertisement, args=(tx_data, tx_address))
+        tx_data, tx_address = bluetooth_rx_socket.recvfrom(1024)
+        # this is a synchronous execution at the moment, i expect broadcasts to be must slower than returns
+        bluetooth_listener_pool.submit(bluetooth_process_advertisement, tx_data, tx_address, bluetooth_tx_socket).result()
 
 
-def bluetooth_process_advertisement(data, address):
-    print("got packet")
-    message = client_socket.recv(1024).decode()
-    print(message)
+def bluetooth_process_advertisement(data, address, bluetooth_tx_socket):
+    message = data.decode()
+    with threading.Lock():
+        for listener in BROADCAST_RECIPIENTS:
+            # TODO: if the last node doesn't have an bound UDP socket at the right address, the system doesn't work for some reason
+            # i think there is some race condition here that is a headache to fix
+            # we could potentially just keep the sockets open
+            if not listener.__eq__(address[0]):
+                receiver_node_address = (listener, BLUETOOTH_TX_PORT)
+                try:
+                    bluetooth_tx_socket.connect(receiver_node_address)
+                    bluetooth_tx_socket.send(message.encode())
+                except OSError as e:
+                    if e.errno == 111:
+                        print(f"listener {listener} not active")
+                    else:
+                        raise
+
 
 def bind_socket(host, port):
     while True:
