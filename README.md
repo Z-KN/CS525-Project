@@ -4,12 +4,14 @@
 ### First, set up the broadcasting nodes
 I usually run bluetooth\_broadcast\_node.py on vm 20
 ```bash
-python3 src/bluetooth_broadcast_node.py -a <ip addresses of non-edge nodes>
+python3 src/bluetooth_broadcast_node.py -a <ip addresses of non-edge non-broadcast nodes>
 ```
 I usually run edge\_broadcast\_node.py on vm 19
 ```bash
-python3 src/edge_broadcast_node.py -e <ip address of edge node> -a <ip addresses of non-edge nodes>
+python3 src/edge_broadcast_node.py -e <ip address of edge node> -a <ip addresses of non-edge non-broadcast nodes>
 ```
+These files are very similar. I can refactor them after the deadline so that we don't need to edit things twice, but at the moment this works.
+
 ### Then, set up the edge server
 Set BROADCAST\_NODE\_ADDRESS to the address of the node running edge\_broadcast\_node.py
 Set NETWORK\_INTERFACE to be the name of the network interface you're using (found with `ip a`)
