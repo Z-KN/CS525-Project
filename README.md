@@ -1,5 +1,9 @@
 # CS525-Project
 
+## Raft-Lite?
+Raft-Lite was written by Nikolas Lamb (original here: https://github.com/nikwl/raft-lite) and is being modified to use Berkeley Sockets instead of 0MQ
+For now, though, we can stick to using broadcasts over 0MQ
+
 ## How to run the emulation
 ### First, set up the broadcasting nodes
 I usually run bluetooth\_broadcast\_node.py on vm 20
