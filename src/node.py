@@ -13,6 +13,9 @@ import psutil
 from enum import Enum
 
 import commitlog
+import consensusobject
+
+import utility_functions
 
 # each device needs a way to write and read application state
 #   functions for writing application state
@@ -32,33 +35,42 @@ import commitlog
 # nodes set individual bits by index
 # i think these operations should be atomic, but here I make the locking explicit
 # i think the best data structure to test on would be a graph, but we can expand this as necessary and refactor
-class LockedConsensusObject:
-    def __init__(self):
-        self.consensus_object = [0]*8
-        self.lock = threading.Lock()
-
-    def set_value(self, index, value):
-        with self.lock:
-            self.consensus_object[index] = value
-
 class RaftState(Enum):
     FOLLOWER = 0
     CANDIDATE = 1
     LEADER = 2
 
-
-
 MAX_BLUETOOTH_LISTENERS = 2
-MAX_HIGH_POWER_LISTENERS = 3
+MAX_HIGH_POWER_LISTENERS = 2
 
+# bluetooth allows intervals between 20 ms and about 10 seconds in 625 us increments.
+# its recommend to use the longest interval possible
 BLUETOOTH_ADVERTISEMENT_INTERVAL = 5e8 # in nanoseconds
-HEARTBEAT_TIMER = 10*BLUETOOTH_ADVERTISEMENT_INTERVAL
+BLUETOOTH_HEARTBEAT_TIMER = 10*BLUETOOTH_ADVERTISEMENT_INTERVAL
 
+EDGE_ADVERTISEMENT_INTERVAL = 1e9
+EDGE_HEARTBEAT_TIMER = 10*EDGE_ADVERTISEMENT_INTERVAL
+
+# this is for the broadcast node abstraction
 BROADCAST_NODE_ADDRESS = '172.22.151.214'
-BLUETOOTH_TX_PORT = 59035
-BLUETOOTH_RX_PORT = 59025
 
-HIGH_POWER_PORT = 60021
+# bluetooth ports (meant to be a separate communication channel)
+BLUETOOTH_TX_PORT = 59021
+BLUETOOTH_RX_PORT = 59031
+
+# edge server broadcast
+EDGE_BROADCAST_RX_PORT = 63031
+
+# edge server ports (meant to be a separate communication channel)
+EDGE_UNICAST_TX_PORT = 61021
+EDGE_UNICAST_RX_PORT = 61031
+
+global edge_server_address_time
+edge_server_address_time = (None, None)
+
+# consensus ports (meant to be a separate communication channel)
+HIGH_POWER_TX_PORT = 60021
+HIGH_POWER_RX_PORT = 60031
 
 parser=argparse.ArgumentParser()
 parser.add_argument('-n', '--name', help='enter integer for node index', required=True)
@@ -141,56 +153,64 @@ class Raft:
         return
 
 
-
-time_collector = lambda : None
-if sys.version_info[0]==3 and sys.version_info[1] < 8:
-    time_collector = lambda : time.perf_counter() * 1e9
-else:
-    time_collector = lambda : time.perf_counter_ns()
-
 def main():
     """
     main
         starts threads that listen and advertise on the bluetooth low energy channel
         binds device to its IP address and sets it to listen on a higher-power channel
     """
-    bluetooth_rx_socket = bind_socket('0.0.0.0', BLUETOOTH_RX_PORT, socket.SOCK_DGRAM)
-    bluetooth_tx_socket = bind_socket('0.0.0.0', BLUETOOTH_TX_PORT, socket.SOCK_DGRAM)
-    high_power_socket = bind_socket('0.0.0.0', HIGH_POWER_PORT, socket.SOCK_STREAM)
+    global edge_server_address_time
+    # socket to communicate to other nodes
+    bluetooth_tx_socket = utility_functions.bind_socket('0.0.0.0', BLUETOOTH_TX_PORT, socket.SOCK_DGRAM)
+    bluetooth_rx_socket = utility_functions.bind_socket('0.0.0.0', BLUETOOTH_RX_PORT, socket.SOCK_DGRAM)
+
+    # socket to reach consensus with other nodes
+    high_power_tx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_TX_PORT, socket.SOCK_STREAM)
+    high_power_rx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_RX_PORT, socket.SOCK_STREAM)
+
+    # socket to unicast to edge server
+    edge_unicast_tx_socket = utility_functions.bind_socket('0.0.0.0', EDGE_UNICAST_TX_PORT, socket.SOCK_STREAM)
+    edge_unicast_rx_socket = utility_functions.bind_socket('0.0.0.0', EDGE_UNICAST_RX_PORT, socket.SOCK_STREAM)
     
+    # socket to receive broadcasts from edge server
+    edge_broadcast_rx_socket = utility_functions.bind_socket('0.0.0.0', EDGE_BROADCAST_RX_PORT, socket.SOCK_DGRAM)
+
     raft = Raft(NODE_INDEX)
 
-    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,raft))
-    listen_thread.start()
+    bluetooth_listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,raft))
+    bluetooth_listen_thread.start()
 
-    systime = time_collector()
+    edge_broadcast_listen_thread = threading.Thread(target=edge_broadcast_listener, args=(edge_broadcast_rx_socket, edge_unicast_tx_socket))
+    edge_broadcast_listen_thread.start()
+
+    systime = utility_functions.get_system_time()
     while(1):
-        if time_collector() - systime >= BLUETOOTH_ADVERTISEMENT_INTERVAL:
+        if utility_functions.get_system_time() - systime >= BLUETOOTH_ADVERTISEMENT_INTERVAL:
             with threading.Lock():
-                systime = time_collector()
+                systime = utility_functions.get_system_time()
                 bluetooth_sender(bluetooth_tx_socket)
-
+                
+                print(edge_server_address_time)
                 keylist = list(raft.local_group.keys())[:]
                 print(keylist)
+                if edge_server_address_time[1] is not None:
+                    if systime - edge_server_address_time[1] >= EDGE_HEARTBEAT_TIMER:
+                        edge_server_address_time = (None, None)
                 for key in keylist:
-                    if systime - raft.local_group[key][1] >= HEARTBEAT_TIMER:
+                    if systime - raft.local_group[key][1] >= BLUETOOTH_HEARTBEAT_TIMER:
                         del raft.local_group[key]
 
+"""
+    BLUETOOTH FUNCTIONS
+"""
 def bluetooth_listener(bluetooth_rx_socket, raft):
     """
     bluetooth_listener
 
         listen for bluetooth low energy advertisements from other devices on the appropriate channel
             people have implemented bluetooth low energy for ns3: https://gitlab.com/Stijng/ns3-ble-module/-/tree/master/ble/examples?ref_type=heads
-            but we can start by modeling a low throughput, high fading channel in ns3 instead of implementing bluetooth-specific work
-        
+            but we can start by modeling a low throughput, high fading channel in ns3 instead of implementing bluetooth-specific work 
         these advertisement we can use are defined as follows (taken from https://www.bluetooth.com/bluetooth-resources/intro-to-bluetooth-advertisements/):
-            undirected - no explicit target
-            scannable - receivers can issue scan requests to get more information from the advertiser
-                in that "more information" we can include things like MAC addresses of neighbors
-
-            bluetooth allows intervals between 20 ms and about 10 seconds in 625 us increments. its recommend to get the longest interval that can fit our use case
-            advertisements are 31 bytes we can work with to our liking
             
         these advertisements will communicate which nodes are nearby, and therefore the nodes that actually need to reach consensus
             we can maintain a small membership list in memory, consisting of MAC addresses or some other identifier
@@ -200,18 +220,14 @@ def bluetooth_listener(bluetooth_rx_socket, raft):
     bluetooth_listener_pool = futures.ThreadPoolExecutor(max_workers=MAX_BLUETOOTH_LISTENERS)
     while(1):
         tx_data, tx_address = bluetooth_rx_socket.recvfrom(1024)
+        # block until this finishes running
         futures.wait([bluetooth_listener_pool.submit(bluetooth_process_advertisement, tx_data, tx_address, raft)])
 
 def bluetooth_process_advertisement(data, address, raft):
     with threading.Lock():
         message = data.decode()
         [unicast_address, node_id] = message.split(",")
-        raft.local_group[node_id] = [unicast_address, time_collector()]
-
-def get_address_on_interface(interface):
-    addrs = psutil.net_if_addrs()
-    my_address_on_interface = addrs[interface][0][1]
-    return my_address_on_interface
+        raft.local_group[node_id] = (unicast_address, utility_functions.get_system_time())
 
 """
 Advertisement Structure
@@ -223,39 +239,80 @@ def bluetooth_sender(bluetooth_tx_socket):
     """
     bluetooth_sender
 
-        propagate bluetooth low energy advertisements on the appropriate channe
-        until we get NS3 working, we can't really do broadcasts under traditional berkeley socket programming.
-            however, we can set up one of our vms to be a broadcasting node, and transmit to that node which will then relay that message to all other nodes
+        propagate bluetooth low energy advertisements on the appropriate channel
     """
     broadcast_node_address = (BROADCAST_NODE_ADDRESS, BLUETOOTH_TX_PORT)  
     bluetooth_tx_socket.connect(broadcast_node_address)
-    address = get_address_on_interface(NETWORK_INTERFACE)
+    address = utility_functions.get_address_on_interface(NETWORK_INTERFACE)
     message = f"{address},{NODE_INDEX}"
     bluetooth_tx_socket.send(message.encode())
 
-def edge_listener(high_power_socket):
+
+
+"""
+    EDGE FUNCTIONS
+"""
+def edge_broadcast_listener(edge_broadcast_rx_socket, edge_unicast_tx_socket):
     """
-    edge_listener
+    edge_broadcast_listener
         this function is meant to run on a thread and listen for edge server broadcasts
         if an edge server is found, it updates the advertisements it sends out to its local group
     """
+    edge_listener_pool = futures.ThreadPoolExecutor(max_workers=2)
+    while(1):
+        tx_data, tx_address = edge_broadcast_rx_socket.recvfrom(1024)
+        print("received")
+        unicast_address = edge_listener_pool.submit(edge_process_advertisement, tx_data, tx_address).result()
+        edge_responder(unicast_address, edge_unicast_tx_socket)
 
-def bind_socket(host, port, connection_type):
-    while True:
-        try:
-            my_socket = socket.socket(socket.AF_INET, connection_type)
-            my_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            my_socket.bind((host, port))
-            break  # Successfully bound the socket
-        except OSError as e:
-            if e.errno == 98:  # Address already in use. should not appear due to SO_REUSEADDR
-                print("Address in use.")
-                time.sleep(1)
-            else:
-                raise
+# for now, this is working with the assumption that if you can advertise to a node via bluetooth, both of you have a good quality connection
+# to the same edge server
+def edge_process_advertisement(data, address):
+    """
+        edge_process_advertisement
+            parse advertisement from edge server, propagate that to peers over bluetooth with heartbeat
+    """
+    with threading.Lock():
+        message = data.decode()
+        print(f"found edge at {message}")
+        global edge_server_address_time
+        edge_server_address_time = (message, utility_functions.get_system_time())
+        return message
 
-    return my_socket
+def edge_responder(edge_unicast_address, edge_unicast_tx_socket):
+    """
+        edge_responder
+            respond to edge server advertisement
+    """
+    edge_unicast_address_port = (edge_unicast_address, EDGE_UNICAST_TX_PORT)
+    # bandaid fix, this might flood the node with spurious setup requests
+    try:
+        edge_unicast_tx_socket.connect(edge_unicast_address_port)
+    except OSError as e:
+        if e.errno == 106:
+            print("already connected")
+        else:
+            raise
 
+    address = utility_functions.get_address_on_interface(NETWORK_INTERFACE)
+    message = f"{address},{NODE_INDEX}"
+    edge_unicast_tx_socket.send(message.encode())
+
+def edge_update_state():
+    """
+    edge_update_state
+
+        if a user creates a feature in a multi-user environment, it needs to update the edge about that feature. if an edge server is not available, then it needs to log the creation of that feature and add coarse-grained information about that feature to the cloud
+        this way, if other users want to interact with that feature, it will still be available to them
+        once a feature is logged with nearby edge servers, it can be associated with spatial SLAM mapping data that is more computationally intensive and localized
+
+    """
+
+
+
+"""
+    CONSENSUS FUNCTIONS
+"""
 def local_agreement(raft):
     """
     local_agreement
@@ -281,22 +338,11 @@ def local_consensus(raft):
     raft_thread.start()
 
     
-
 def local_dissemination(raft):
     """
     local_dissemination
 
         here, the node spawns a request to get state from the edge server
-    """
-
-def update_state():
-    """
-    update_state
-
-        if a user creates a feature in a multi-user environment, it needs to update the edge about that feature. if an edge server is not available, then it needs to log the creation of that feature and add coarse-grained information about that feature to the cloud
-        this way, if other users want to interact with that feature, it will still be available to them
-        once a feature is logged with nearby edge servers, it can be associated with spatial SLAM mapping data that is more computationally intensive and localized
-
     """
 
 def update_peers():

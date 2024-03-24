@@ -8,9 +8,10 @@ import socket
 from concurrent import futures
 import threading
 
-global BLUETOOTH_RX_PORT
-BLUETOOTH_RX_PORT = 59035
-BLUETOOTH_TX_PORT = 59025
+import utility_functions
+
+BLUETOOTH_TX_PORT = 59031
+BLUETOOTH_RX_PORT = 59021
 
 parser=argparse.ArgumentParser()
 parser.add_argument('-a', '--addresses', nargs='+', help='enter addresses of nodes to be broadcasted to', required=True)
@@ -22,16 +23,15 @@ BROADCAST_RECIPIENTS = args.addresses
 MAX_BLUETOOTH_LISTENERS = len(BROADCAST_RECIPIENTS)
 
 def main():
-    bluetooth_rx_socket = bind_socket('0.0.0.0', BLUETOOTH_RX_PORT)
-    bluetooth_tx_socket = bind_socket('0.0.0.0', BLUETOOTH_TX_PORT)
-    
-    #high_power_socket = bind_socket('0.0.0.0', HIGH_POWER_PORT)
+    bluetooth_tx_socket = utility_functions.bind_socket('0.0.0.0', BLUETOOTH_TX_PORT, socket.SOCK_DGRAM)
+    bluetooth_rx_socket = utility_functions.bind_socket('0.0.0.0', BLUETOOTH_RX_PORT, socket.SOCK_DGRAM)
+   
+    bluetooth_listener(bluetooth_tx_socket, bluetooth_rx_socket)
+    #listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket, bluetooth_tx_socket))
+    #listen_thread.start()
+    #listen_thread.join()
 
-    listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket, bluetooth_tx_socket))
-    listen_thread.start()
-    listen_thread.join()
-
-def bluetooth_listener(bluetooth_rx_socket, bluetooth_tx_socket):
+def bluetooth_listener(bluetooth_tx_socket, bluetooth_rx_socket):
     bluetooth_listener_pool = futures.ThreadPoolExecutor(max_workers=MAX_BLUETOOTH_LISTENERS)
     while(1):
         tx_data, tx_address = bluetooth_rx_socket.recvfrom(1024)
@@ -56,23 +56,6 @@ def bluetooth_process_advertisement(data, address, bluetooth_tx_socket):
                         print(f"listener {listener} not active")
                     else:
                         raise
-
-
-def bind_socket(host, port):
-    while True:
-        try:
-            my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            my_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            my_socket.bind((host, port))
-            break  # Successfully bound the socket
-        except OSError as e:
-            if e.errno == 98:  # Address already in use
-                print("Address in use. Retrying in a moment...")
-                time.sleep(1)
-            else:
-                raise
-
-    return my_socket
 
 if __name__ == "__main__":
     main()
