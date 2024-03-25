@@ -16,7 +16,7 @@ import commitlog
 import consensusobject
 
 import utility_functions
-from ..raft import RaftNode
+from raft import RaftNode
 
 # each device needs a way to write and read application state
 #   functions for writing application state
@@ -35,11 +35,7 @@ from ..raft import RaftNode
 # we are trying to reach consensus on one byte
 # nodes set individual bits by index
 # i think these operations should be atomic, but here I make the locking explicit
-# i think the best data structure to test on would be a graph, but we can expand this as necessary and refactor
-class RaftState(Enum):
-    FOLLOWER = 0
-    CANDIDATE = 1
-    LEADER = 2
+# i think the best data structure to test on would be a graph, but we can expand this as necessary and refacto
 
 MAX_BLUETOOTH_LISTENERS = 2
 MAX_HIGH_POWER_LISTENERS = 2
@@ -81,103 +77,6 @@ NODE_INDEX = int(args.name)
 
 NETWORK_INTERFACE = "ens33"
 
-# RAFT PARAMETERS
-class Raft(RaftNode):
-    def __init__(self, node_id):
-        # all nodes start as followers
-        self.node_id = node_id
-        self.state = RaftState.FOLLOWER
-        self.local_group = dict()
-        super().__init__(self.local_group, node_id)
-
-        # from paper page 4
-        # PERSISTENT STATE
-        # the current election term, and the id of the node voted for. right now ids are assigned at runtime, but these can be mac addresses
-        self.current_term = 1
-        # initialize Commit Log
-        self.commit_log = commitlog.CommitLog(file=f"commit-log-{node_id}.txt")
-        commit_logfile = pathlib.Path(self.commit_log.file)
-        commit_logfile.touch(exist_ok=True)
-
-        # id of current leader, useful in case this node hears of another election but knows of a valid leader
-        # it can also pass its unicast information
-        self.leader_id = -1
-
-        # VOLATILE STATE
-        # most recent state change in log
-        self.commit_index = 0
-        # last applied point in log
-        self.last_applied = 0
- 
-        # STATE FOR LEADERS/CANDIDATES
-        # total set of members, collected by bluetooth advertisements
-        # for each member, their entries should contain nextIndex and matchIndex information
-        # also should contain a marker on whether or not they voted for this node, if it's a candidate
-
-        # STATE FOR FOLLOWERS 
-        # id of node that this follower voted for
-        self.voted_for = -1
-        self.election_timeout = -1
-
-        # OTHER PARAMETERS
-        # nodes have random election timeouts in order to avoid simultaneous elections. these parameters will have to be tuned
-        self.election_period_ms = random.randint(1000, 5000)
-        # because the nodes are not unicasting, we do a probabilistic broadcast to avoid interference as mentioned in one of our references
-        # right now its much faster than the advertisement interval
-        self.broadcast_timer = random.randint(50, 100)
-
-    # if you want to begin consensus, unicast a message to all peers in your local group. then set your state to a follower
-    # if you receive a consensus message, unicast a message to all peers in your local group containing information about the peers you're already connected to. then set your state to a follower
-    # either way, begin this program
-    # approach a feature
-    # todo: determine when to start consensus
-    def begin_consensus(self):
-        # Let a leader emerge
-        time.sleep(15)
-
-        # Make some requests based on the node ID
-        """
-        this part not sure
-        what client_request will happen
-        if self.node_id == 2 or self.node_id == 2:
-            self.client_request({'val': 2})
-        else:
-            self.client_request({'val': 3})
-
-        """
-        time.sleep(5)
-
-        # Check and see what the most recent entry is
-        print(self.check_committed_entry())
-
-        # Stop the node
-        self.stop()
-        # todo: what happends after stop 
-        # elapse your timer
-        # if your timer elapses first, then start an election with request_vote
-        # if you hear that another node started an election, run handle_request_vote
-        return
-
-    # invoked by leader to replicate log entries
-    # doesn't need to function as a heartbeat, since the bluetooth performs that same role
-    def append_entries(self):
-        return
-
-    def handle_append_entries(self):
-        return
-
-    def request_vote(self):
-        # send your current term
-        # your candidate id
-        # the index of your last log entry
-        # and the term of your last log entry
-        return
-
-    def handle_request_vote(self):
-        # if the term in request_vote is less than the actual term, let that node know
-        # otherwise, if you haven't already voted for this term, and their log is up to date, give them a vote
-        return
-
 
 def main():
     """
@@ -191,8 +90,8 @@ def main():
     bluetooth_rx_socket = utility_functions.bind_socket('0.0.0.0', BLUETOOTH_RX_PORT, socket.SOCK_DGRAM)
 
     # socket to reach consensus with other nodes
-    high_power_tx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_TX_PORT, socket.SOCK_STREAM)
-    high_power_rx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_RX_PORT, socket.SOCK_STREAM)
+    # high_power_tx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_TX_PORT, socket.SOCK_STREAM)
+    # high_power_rx_socket = utility_functions.bind_socket('0.0.0.0', HIGH_POWER_RX_PORT, socket.SOCK_STREAM)
 
     # socket to unicast to edge server
     edge_unicast_tx_socket = utility_functions.bind_socket('0.0.0.0', EDGE_UNICAST_TX_PORT, socket.SOCK_STREAM)
@@ -201,9 +100,9 @@ def main():
     # socket to receive broadcasts from edge server
     edge_broadcast_rx_socket = utility_functions.bind_socket('0.0.0.0', EDGE_BROADCAST_RX_PORT, socket.SOCK_DGRAM)
 
-    raft = Raft(NODE_INDEX)
+    local_group = dict()
 
-    bluetooth_listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,raft))
+    bluetooth_listen_thread = threading.Thread(target=bluetooth_listener, args=(bluetooth_rx_socket,local_group))
     bluetooth_listen_thread.start()
 
     edge_broadcast_listen_thread = threading.Thread(target=edge_broadcast_listener, args=(edge_broadcast_rx_socket, edge_unicast_tx_socket))
@@ -217,19 +116,26 @@ def main():
                 bluetooth_sender(bluetooth_tx_socket)
                 
                 print(edge_server_address_time)
-                keylist = list(raft.local_group.keys())[:]
+                keylist = list(local_group.keys())[:]
+
+                # if the length of the keylist is 3, run consensus
+                # this is a BAD(!!) trigger but it shows that consensus will run
+                # we need to improve this trigger so that we can choose when to run consensus
+                if len(keylist) == 3:
+                    local_consensus(local_group)
+
                 print(keylist)
                 if edge_server_address_time[1] is not None:
                     if systime - edge_server_address_time[1] >= EDGE_HEARTBEAT_TIMER:
                         edge_server_address_time = (None, None)
                 for key in keylist:
-                    if systime - raft.local_group[key][1] >= BLUETOOTH_HEARTBEAT_TIMER:
-                        del raft.local_group[key]
+                    if systime - local_group[key][1] >= BLUETOOTH_HEARTBEAT_TIMER:
+                        del local_group[key]
 
 """
     BLUETOOTH FUNCTIONS
 """
-def bluetooth_listener(bluetooth_rx_socket, raft):
+def bluetooth_listener(bluetooth_rx_socket, local_group):
     """
     bluetooth_listener
 
@@ -247,13 +153,13 @@ def bluetooth_listener(bluetooth_rx_socket, raft):
     while(1):
         tx_data, tx_address = bluetooth_rx_socket.recvfrom(1024)
         # block until this finishes running
-        futures.wait([bluetooth_listener_pool.submit(bluetooth_process_advertisement, tx_data, tx_address, raft)])
+        futures.wait([bluetooth_listener_pool.submit(bluetooth_process_advertisement, tx_data, tx_address, local_group)])
 
-def bluetooth_process_advertisement(data, address, raft):
+def bluetooth_process_advertisement(data, address, local_group):
     with threading.Lock():
         message = data.decode()
         [unicast_address, node_id] = message.split(",")
-        raft.local_group[node_id] = (unicast_address, utility_functions.get_system_time())
+        local_group[node_id] = (unicast_address, utility_functions.get_system_time())
 
 """
 Advertisement Structure
@@ -351,7 +257,7 @@ def local_agreement(raft):
         if the heartbeat is active, then we know of an edge server. if we know of an alive edge server, then our local group likely does as well. we can move to local_dissemination
     """
 
-def local_consensus(raft):
+def local_consensus(local_group):
     """
     local_consensus
 
@@ -360,9 +266,30 @@ def local_consensus(raft):
 
         over this channel, we can use RAFT. we can try to use a churn-tolerant leader election sceheme, but I think we can analyze whether there's a lot of churn first. I have a suspicion we won't have a lot, because even if users are "churning" in and out of the local group, they will still be reachable by a higher-power channel. they can then reject participation explicitly, or time out. 
     """
-    raft_thread = threading.Thread(target=raft.begin_consensus, args=(raft,))
-    raft_thread.start()
+    comm_dict = dict()
+    for key in local_group.keys():
+        comm_dict[key] = {'ip': local_group[key][0], 'port': str(HIGH_POWER_TX_PORT)}
 
+    comm_dict[str(NODE_INDEX)] = {'ip': utility_functions.get_address_on_interface(NETWORK_INTERFACE), 'port': str(HIGH_POWER_TX_PORT)} 
+
+    self = RaftNode(comm_dict, str(NODE_INDEX))
+    self.start()
+
+    time.sleep(15)
+
+    # Make some requests
+    if str(NODE_INDEX).__eq__("2") or str(NODE_INDEX).__eq__("3"):
+        self.client_request({'val': 2})
+    else:
+        self.client_request({'val': 3})
+
+    time.sleep(5)
+
+    # Check and see what the most recent entry is
+    print(self.check_committed_entry())
+
+    # Stop all the nodes
+    self.stop()
     
 def local_dissemination(raft):
     """
