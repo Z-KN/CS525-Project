@@ -85,7 +85,10 @@ NETWORK_INTERFACE = "ens33"
 class Raft(RaftNode):
     def __init__(self, node_id):
         # all nodes start as followers
+        self.node_id = node_id
         self.state = RaftState.FOLLOWER
+        self.local_group = dict()
+        super().__init__(self.local_group, node_id)
 
         # from paper page 4
         # PERSISTENT STATE
@@ -110,7 +113,6 @@ class Raft(RaftNode):
         # total set of members, collected by bluetooth advertisements
         # for each member, their entries should contain nextIndex and matchIndex information
         # also should contain a marker on whether or not they voted for this node, if it's a candidate
-        self.local_group = dict()
 
         # STATE FOR FOLLOWERS 
         # id of node that this follower voted for
@@ -127,7 +129,30 @@ class Raft(RaftNode):
     # if you want to begin consensus, unicast a message to all peers in your local group. then set your state to a follower
     # if you receive a consensus message, unicast a message to all peers in your local group containing information about the peers you're already connected to. then set your state to a follower
     # either way, begin this program
+    # approach a feature
+    # todo: determine when to start consensus
     def begin_consensus(self):
+        # Let a leader emerge
+        time.sleep(15)
+
+        # Make some requests based on the node ID
+        """
+        this part not sure
+        what client_request will happen
+        if self.node_id == 2 or self.node_id == 2:
+            self.client_request({'val': 2})
+        else:
+            self.client_request({'val': 3})
+
+        """
+        time.sleep(5)
+
+        # Check and see what the most recent entry is
+        print(self.check_committed_entry())
+
+        # Stop the node
+        self.stop()
+        # todo: what happends after stop 
         # elapse your timer
         # if your timer elapses first, then start an election with request_vote
         # if you hear that another node started an election, run handle_request_vote
