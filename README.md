@@ -17,6 +17,7 @@ python3 src/edge_broadcast_node.py -e <ip address of edge node> -a <ip addresses
 These files are very similar. I can refactor them after the deadline so that we don't need to edit things twice, but at the moment this works.
 
 ### Then, set up the edge server
+In `edge.py`:
 Set BROADCAST\_NODE\_ADDRESS to the address of the node running edge\_broadcast\_node.py
 Set NETWORK\_INTERFACE to be the name of the network interface you're using (found with `ip a`)
 ```python
@@ -29,6 +30,7 @@ python3 src/edge.py
 ```
 
 ### Finally, set up your nodes
+In `node.py`
 Set BROADCAST\_NODE\_ADDRESS to the address of the node running **bluetooth**\_broadcast\_node.py
 Set NETWORK\_INTERFACE to be the name of the network interface you're using (found with `ip a`)
 ```python
