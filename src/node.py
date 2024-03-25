@@ -16,6 +16,7 @@ import commitlog
 import consensusobject
 
 import utility_functions
+from ..raft import RaftNode
 
 # each device needs a way to write and read application state
 #   functions for writing application state
@@ -81,7 +82,7 @@ NODE_INDEX = int(args.name)
 NETWORK_INTERFACE = "ens33"
 
 # RAFT PARAMETERS
-class Raft:
+class Raft(RaftNode):
     def __init__(self, node_id):
         # all nodes start as followers
         self.state = RaftState.FOLLOWER
