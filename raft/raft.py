@@ -14,6 +14,7 @@ import threading
 from queue import Queue, Empty
 
 from .interface import Listener, Talker
+#from .berkeley_socket_interface import Listener, Talker
 from .protocol import MessageType, MessageDirection, RequestVotesResults, \
     AppendEntriesResults, RequestVotesMessage, AppendEntriesMessage, \
     parse_json_message
@@ -84,6 +85,7 @@ class RaftNode(threading.Thread):
         self.listener = Listener(port_list=self.all_ids, identity=identity)
         self.listener.start()
         self.talker = Talker(identity=identity)
+        #self.talker = Talker(port_list=self.all_ids, identity=identity)
         self.talker.start()
 
     def stop(self):

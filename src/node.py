@@ -247,8 +247,6 @@ def bluetooth_sender(bluetooth_tx_socket):
     message = f"{address},{NODE_INDEX}"
     bluetooth_tx_socket.send(message.encode())
 
-
-
 """
     EDGE FUNCTIONS
 """

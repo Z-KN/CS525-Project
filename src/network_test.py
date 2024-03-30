@@ -10,10 +10,10 @@ args = parser.parse_args()
 node_name = args.name
 
 # Create the intercommunication json 
-comm_dict = {"1": {"ip": "172.22.151.96", "port": "5567"}, 
-             "2": {"ip": "172.22.153.5", "port": "5566"},
-             "3": {"ip": "172.22.154.232", "port": "5565"},
-             "4": {"ip": "172.22.151.210", "port": "5564"}}
+comm_dict = {"1": {"ip": "172.22.151.96", "port": "60021"}, 
+             "2": {"ip": "172.22.153.5", "port": "60021"},
+             "3": {"ip": "172.22.154.232", "port": "60021"},
+             "4": {"ip": "172.22.151.210", "port": "60021"}}
 
 print(node_name)
 
