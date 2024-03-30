@@ -41,16 +41,25 @@ self = RaftNode(comm_dict, node_name)
 self.start()
 
 # Let a leader emerge
-time.sleep(2)
+#time.sleep(2)
 
 # Make some requests
 self.client_request({'val': node_name})
 
 #time.sleep(2)
-time.sleep(5)
-
+last_entry = self.check_committed_entry
 print(self.check_committed_entry(), file=log_file)
 print(get_system_time(), file=log_file)
+# Check and see what the most recent entry is
+while(1):
+    try:
+        if self.check_committed_entry() is not last_entry:
+            last_entry = self.check_committed_entry
+            print(self.check_committed_entry(), file=log_file)
+            print(get_system_time(), file=log_file)
+        time.sleep(0.01)
+    except KeyboardInterrupt:
+        self.stop()
+        break
 
 # Stop all the nodes
-self.stop()
