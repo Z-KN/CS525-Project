@@ -1,0 +1,32 @@
+1
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: election timed out
+1: became candidate
+1: became leader
+1: updated standing is [1, 1, 0, 0] my index: 1
+1: updated standing is [1, 1, 1, 0] my index: 1
+1: updated standing is [1, 1, 1, 1] my index: 1
+1: updated standing is [2, 2, 1, 1] my index: 2
+1: updated standing is [2, 2, 1, 2] my index: 2
+1: updated standing is [2, 2, 2, 2] my index: 2
+{'val': 3}
