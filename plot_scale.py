@@ -4,18 +4,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Values for the x-axis
-x = np.array(['2', '3', '4', '5', '6', '7', '8', '9', '10'])
+x = np.array(['5', '8', '10', '13', '15', '18', '20'])
 # Values for the y-axis
-y = np.array([2, 3, 5, 7, 8, 9, 10, 11, 12])
-std_y = np.array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+y = np.array([1.5024, 1.5696, 1.5441, 1.7375, 1.7951, 2.25600, 1.9053])
+std_y = np.array([0.0381, 0.0529, 0.0554, 0.2407, 0.1649, 0.5511, 0.0077])
 
 # Plot the bar plot with error bar
 
-plt.bar(x, y, yerr=std_y, capsize=7, color='green')
+plt.errorbar(x, y, yerr=std_y)
 plt.xlabel('Number of nodes in the network')
 # also plot the standard deviation
 # plt.errorbar(x, y, yerr=std_y, fmt='o')
 plt.ylabel('Time to consensus (s)')
 # plt.title('Number of times each node committed')
 plt.savefig('consensus-time.png')
-plt.show()lt.show()
+plt.show()
