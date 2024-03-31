@@ -26,19 +26,19 @@ comm_dict = {"01": {"ip": "172.22.151.96", "port": "5567"},
              "05": {"ip": "172.22.151.97", "port": "5567"},
              "06": {"ip": "172.22.153.6", "port": "5567"},
              "07": {"ip": "172.22.154.233", "port": "5567"},
-             "08": {"ip": "172.22.151.211", "port": "5567"}#,
-             #"09": {"ip": "172.22.151.98", "port": "5567"},
-             #"10": {"ip": "172.22.153.7", "port": "5567"},
-             #"11": {"ip": "172.22.154.234", "port": "5567"}, 
-             #"12": {"ip": "172.22.151.212", "port": "5567"},
-             #"13": {"ip": "172.22.151.99", "port": "5567"},
-             #"14": {"ip": "172.22.153.8", "port": "5567"},
-             #"15": {"ip": "172.22.154.235", "port": "5567"},
-             #"16": {"ip": "172.22.151.213", "port": "5567"},
-             #"17": {"ip": "172.22.151.100", "port": "5567"},
-             #"18": {"ip": "172.22.153.9", "port": "5567"},
-             #"19": {"ip": "172.22.154.236", "port": "5567"},
-             #"20": {"ip": "172.22.151.214", "port": "5567"}
+             "08": {"ip": "172.22.151.211", "port": "5567"},
+             "09": {"ip": "172.22.151.98", "port": "5567"},
+             "10": {"ip": "172.22.153.7", "port": "5567"},
+             "11": {"ip": "172.22.154.234", "port": "5567"}, 
+             "12": {"ip": "172.22.151.212", "port": "5567"},
+             "13": {"ip": "172.22.151.99", "port": "5567"},
+             "14": {"ip": "172.22.153.8", "port": "5567"},
+             "15": {"ip": "172.22.154.235", "port": "5567"},
+             "16": {"ip": "172.22.151.213", "port": "5567"},
+             "17": {"ip": "172.22.151.100", "port": "5567"},
+             "18": {"ip": "172.22.153.9", "port": "5567"},
+             "19": {"ip": "172.22.154.236", "port": "5567"},
+             "20": {"ip": "172.22.151.214", "port": "5567"}
              }
 
 log_file=open("log.txt", "a")
@@ -59,32 +59,21 @@ self.client_request({'val': node_name})
 #time.sleep(2)
 last_entry = self.check_committed_entry
 print(self.check_committed_entry(), file=log_file)
-<<<<<<< HEAD
 print(get_system_time(), file=log_file)
 # Check and see what the most recent entry is
 while(1):
     time.sleep(0.01)
-=======
 print(get_system_time()/1e9, file=log_file)
 # Check and see what the most recent entry is
 while(1):
->>>>>>> 670baa7160bde9b1c8812231bb8170e29ca91f61
     try:
         if self.check_committed_entry() is not last_entry:
-            last_entry = self.check_committed_entry
+            last_entry = self.check_committed_entry()
             print(self.check_committed_entry(), file=log_file)
-<<<<<<< HEAD
             print(get_system_time(), file=log_file)
-    except KeyboardInterrupt:
-        self.stop()
-        break
-    
-=======
-            print(get_system_time()/1e9, file=log_file)
         time.sleep(0.01)
     except KeyboardInterrupt:
         self.stop()
         break
 
 # Stop all the nodes
->>>>>>> 670baa7160bde9b1c8812231bb8170e29ca91f61
