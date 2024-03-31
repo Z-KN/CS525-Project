@@ -59,16 +59,32 @@ self.client_request({'val': node_name})
 #time.sleep(2)
 last_entry = self.check_committed_entry
 print(self.check_committed_entry(), file=log_file)
+<<<<<<< HEAD
 print(get_system_time(), file=log_file)
 # Check and see what the most recent entry is
 while(1):
     time.sleep(0.01)
+=======
+print(get_system_time()/1e9, file=log_file)
+# Check and see what the most recent entry is
+while(1):
+>>>>>>> 670baa7160bde9b1c8812231bb8170e29ca91f61
     try:
         if self.check_committed_entry() is not last_entry:
             last_entry = self.check_committed_entry
             print(self.check_committed_entry(), file=log_file)
+<<<<<<< HEAD
             print(get_system_time(), file=log_file)
     except KeyboardInterrupt:
         self.stop()
         break
     
+=======
+            print(get_system_time()/1e9, file=log_file)
+        time.sleep(0.01)
+    except KeyboardInterrupt:
+        self.stop()
+        break
+
+# Stop all the nodes
+>>>>>>> 670baa7160bde9b1c8812231bb8170e29ca91f61
