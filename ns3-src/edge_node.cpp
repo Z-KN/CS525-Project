@@ -79,6 +79,58 @@ private:
     std::map<Ipv4Address, Time> knownNodes;
 };
 
+
+// TODO: split the classes into multiple files
+
+class ClientApplication : public ns3::Application {
+public:
+    ClientApplication() {}
+
+
+    // All the setup for the ports and sockets done here
+    virtual void StartApplication() {
+        Ptr<Node> node = GetNode();
+
+        clientSocket = Socket::CreateSocket(node, UdpSocketFactory::GetTypeId());
+        clientSocket->Bind(InetSocketAddress(Ipv4Address::GetAny(), 63031));
+        clientSocket->SetRecvCallback(MakeCallback(&ClientApplication::ReceiveData, this));
+
+        sendEvent = Simulator::Schedule(Seconds(1), &ClientApplication::SendData, this);
+    }
+
+    virtual void StopApplication() {}
+
+private:
+
+    // Hook to whenever data is received
+    void ReceiveData(Ptr<Socket> socket) {
+        Ptr<Packet> packet = socket->Recv();
+        uint32_t dataSize = packet->GetSize();
+        uint8_t buffer[dataSize];
+        packet->CopyData(buffer, dataSize);
+        std::string data(reinterpret_cast<char*>(buffer), dataSize);
+
+        Address senderAddress;
+        socket->GetPeerName(senderAddress);
+        Ipv4Address senderIpv4Address = InetSocketAddress::ConvertFrom(senderAddress).GetIpv4();
+        std::cout << "Received data from " << senderIpv4Address << ": " << data << std::endl;
+    }
+
+    // What to send and when to send 
+
+    // This should be triggered by adding it to the simulator schedule as in line 23
+    void SendData() {
+        Ptr<Ipv4> ipv4 = GetNode()->GetObject<Ipv4>();
+        Ipv4Address address = ipv4->GetAddress(1, 0).GetLocal();
+        std::string message = std::to_string(address.Get());
+        clientSocket->SendTo(Ptr<Packet>(Create<Packet>((const uint8_t*)message.c_str(), message.size())), 0, InetSocketAddress(Ipv4Address::GetAny(), 61021));
+    }
+
+    Ptr<Socket> clientSocket;
+    EventId sendEvent;
+}; // This is a copy of the server application, but needs to be edited to replicate the other behavior
+
+
 int main(int argc, char* argv[]) {
     ns3::NodeContainer nodes;
     nodes.Create(2); // Assuming only one node for simplicity
