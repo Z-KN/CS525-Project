@@ -32,6 +32,24 @@ class EdgeAwareClientApplication : public ns3::Application {
 public:
     EdgeAwareClientApplication() {}
 
+    void Setup(Ptr<Socket> socket, Ptr<Socket> recvSocket_,  Address address) {
+        clientSocket = socket;
+        destination = address;
+        recvSocket = recvSocket_;
+        // clientSocket -> Bind();
+
+        // NS_LOG_INFO(clientSocket->Connect(address));
+    }
+
+    void triggerReceive() {
+        clientSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
+    }
+
+    void onAccept(Ptr<Socket> s, const Address& from) {
+        NS_LOG_INFO("Accepted connection");
+        s->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
+    }
+
     // All the setup for the ports and sockets done here
     virtual void StartApplication() {
         Ptr<Node> node = GetNode();
@@ -44,7 +62,7 @@ public:
         // double distance = 5.0f;
 
         // uniform noise generator, seeded on node id
-        RngSeedManager::SetSeed(node_id);
+        RngSeedManager::SetSeed(node_id + 1);
         
         auto unif_rv = CreateObject<UniformRandomVariable>(); 
         unif_rv->SetAttribute("Min", DoubleValue(-1.0));
@@ -74,9 +92,17 @@ public:
         std::map<uint32_t, std::pair<std::string, uint32_t>> localGroup;
         // EVAN Addition <<<
 
-        clientSocket = Socket::CreateSocket(node, UdpSocketFactory::GetTypeId());
-        clientSocket->Bind(InetSocketAddress(Ipv4Address::GetAny(), 63031));
-        clientSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
+        recvSocket->Listen();
+        recvSocket->SetAcceptCallback (
+            MakeNullCallback<bool, Ptr<Socket>, const Address &> (),
+            MakeCallback (&EdgeAwareClientApplication::onAccept, this));
+
+        // clientSocket = Socket::CreateSocket(node, UdpSocketFactory::GetTypeId());
+        // clientSocket->Bind(InetSocketAddress(Ipv4Address::GetAny(), 63031));
+        // clientSocket->Bind();
+        clientSocket->Bind();
+        clientSocket->Connect(destination);
+        
 
         sendEvent = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::SendAdvertisement, this);
         // EVAN: things we need to schedule
@@ -94,11 +120,14 @@ private:
     }
 
     // Hook to whenever data is received
+    // For some reason this callback does not work
     void ReceiveData(Ptr<Socket> socket) {
+        NS_LOG_INFO("testing");
         Ptr<Packet> packet = socket->Recv();
         uint32_t dataSize = packet->GetSize();
         uint8_t buffer[dataSize];
         packet->CopyData(buffer, dataSize);
+        NS_LOG_INFO("Received data from " << socket->GetNode()->GetId());
         std::string data(reinterpret_cast<char*>(buffer), dataSize);
 
         // first, parse the stringified packet
@@ -144,6 +173,7 @@ private:
     void SendAdvertisement() {
         Ptr<Ipv4> ipv4 = GetNode()->GetObject<Ipv4>();
         Ipv4Address address = ipv4->GetAddress(1, 0).GetLocal();
+        NS_LOG_INFO("Sending advertisement");
         // if we are using one interface, this message should start with a header, so that ReceiveData knows how to parse it. since my old computer is down, I can't
         // refer to our old 438 code, but we can use something like that. what is here now isn't a great delimiter
         std::string header = "advert";
@@ -152,11 +182,17 @@ private:
         //for each entry in AgreementInformation_vec
         //      if its in nearby elements
         //              add {element index i, AgreementInformation_vec.get(i).version_number, AgreementInformation_vec.get(i).round_number}\0 to the message
-        clientSocket->SendTo(Ptr<Packet>(Create<Packet>((const uint8_t*)message.c_str(), message.size())), 0, InetSocketAddress(Ipv4Address::GetAny(), 61021));
+        // clientSocket->SendTo(Ptr<Packet>(Create<Packet>((const uint8_t*)message.c_str(), message.size())), 0, InetSocketAddress(Ipv4Address::GetAny(), 61021));
+        
+        Ptr<Packet> packet = Create<Packet>((const uint8_t*)message.c_str(), message.size());
+        clientSocket->Send(packet);
     }
 
     Ptr<Socket> clientSocket;
     EventId sendEvent;
+    Address destination;
+    DataRate m_dataRate;
+    Ptr<Socket> recvSocket;
 }; // This is a copy of the server application, but needs to be edited to replicate the other behavior
 
 
@@ -170,7 +206,7 @@ int main(int argc, char *argv[]) {
     // cmd.Parse(argc, argv);
 
     NodeContainer nodes;
-    nodes.Create(10);  
+    nodes.Create(2);  
 
     InternetStackHelper internet;
     internet.Install(nodes);
@@ -180,11 +216,8 @@ int main(int argc, char *argv[]) {
     p2p.SetChannelAttribute("Delay", StringValue("2ms"));
     NetDeviceContainer devices;
 
-    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-        for (uint32_t j = i + 1; j < nodes.GetN(); ++j) {
-            devices.Add(p2p.Install(nodes.Get(i), nodes.Get(j)));
-        }
-    }
+
+    devices = p2p.Install(nodes);
     NS_LOG_INFO("Testing");
 
     // IP address assignment 
@@ -194,32 +227,42 @@ int main(int argc, char *argv[]) {
 
     p2p.EnablePcapAll("peer-to-peer"); 
 
-    uint16_t port = 9; 
+    // uint16_t port = 9; 
 
     // EVAN: you don't have to iterate over everything yourself, the helpers can take a lost of nodes and install
     // things for you
-    for (uint32_t i = 0; i < nodes.GetN(); ++i) {
-        // Replace the server and clients (one server/client per node for now)
-        UdpEchoServerHelper echoServer(port);
-        ApplicationContainer serverApps = echoServer.Install(nodes.Get(i));
-        serverApps.Start(Seconds(1.0));
-        serverApps.Stop(Seconds(10.0));
 
-        Ptr<UdpEchoServer> server = DynamicCast<UdpEchoServer>(serverApps.Get(0));
-        server->TraceConnectWithoutContext("Rx", MakeCallback(&TracePackets));
-        UdpEchoClientHelper echoClient(interfaces.GetAddress((i + 1) % nodes.GetN()), port);
-        
+    // Temporary way to do it but we can do a loop for each node or we can write a helper
+    Ptr<EdgeAwareClientApplication> clientApp1 = CreateObject<EdgeAwareClientApplication>();
+    Ptr<Socket> UdpSocket = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
+    Ptr<Socket> UdpSocketRecv = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
 
-        echoClient.SetAttribute("MaxPackets", UintegerValue(1));
-        echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
-        echoClient.SetAttribute("PacketSize", UintegerValue(1024));
+    UdpSocketRecv -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
+    
+    uint16_t port = 8080;
+    Address client1Address(InetSocketAddress(interfaces.GetAddress(1), port));
+    Address client2Address(InetSocketAddress(interfaces.GetAddress(0), port));
 
-        // Start the client application at time 2.0 seconds
-        ApplicationContainer clientApps = echoClient.Install(nodes.Get(i));
-        clientApps.Start(Seconds(2.0));
-        clientApps.Stop(Seconds(10.0));
-    }
+    
+    clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
+    nodes.Get(0)->AddApplication(clientApp1);
+    clientApp1->SetStartTime(Seconds(1.0));
+    clientApp1->SetStopTime(Seconds(10.0));
 
+    clientApp1->triggerReceive();
+
+    Ptr<EdgeAwareClientApplication> clientApp2 = CreateObject<EdgeAwareClientApplication>();
+    Ptr<Socket> UdpSocket2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
+    Ptr<Socket> UdpSocketRecv2 = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
+    UdpSocketRecv2 -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
+
+
+    clientApp2->Setup(UdpSocket2, UdpSocketRecv2, client1Address); // setup connection to 0th node
+    nodes.Get(1)->AddApplication(clientApp2);
+    clientApp2->SetStartTime(Seconds(1.0));
+    clientApp2->SetStopTime(Seconds(10.0));
+
+    clientApp2->triggerReceive();
     // Enable global static routing
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
