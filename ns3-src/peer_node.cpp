@@ -5,6 +5,8 @@
 #include "ns3/point-to-point-module.h"
 #include "ns3/ipv4-global-routing-helper.h"
 #include "ns3/udp-echo-helper.h"
+#include "ns3/mobility-module.h"
+#include "ns3/mobility-helper.h"
 
 using namespace ns3;
 
@@ -243,6 +245,27 @@ int main(int argc, char *argv[]) {
     Address client1Address(InetSocketAddress(interfaces.GetAddress(1), port));
     Address client2Address(InetSocketAddress(interfaces.GetAddress(0), port));
 
+    MobilityHelper mobility;
+
+    mobility.SetPositionAllocator("ns3::GridPositionAllocator",
+                                  "MinX",
+                                  DoubleValue(0.0),
+                                  "MinY",
+                                  DoubleValue(0.0),
+                                  "DeltaX",
+                                  DoubleValue(5.0),
+                                  "DeltaY",
+                                  DoubleValue(10.0),
+                                  "GridWidth",
+                                  UintegerValue(3),
+                                  "LayoutType",
+                                  StringValue("RowFirst"));
+
+    mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel",
+                              "Bounds",
+                              RectangleValue(Rectangle(-50, 50, -50, 50)),
+                              "Speed", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+    mobility.Install(nodes);
     
     clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
     nodes.Get(0)->AddApplication(clientApp1);
