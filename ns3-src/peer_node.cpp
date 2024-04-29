@@ -445,7 +445,8 @@ private:
     // this function runs every five seconds, and iterates over the list of nodes
     // it prunes the nodes from the local group that have not been responsive for 10 seconds
     void CheckHeartbeats() {
-        std::vector<uint32_t> deletionSet(2);
+        std::vector<uint32_t> deletionSet;
+        deletionSet.reserve(2);
         uint32_t currentTime = Simulator::Now().GetMilliSeconds();
         for(auto localGroupNodePair : localGroup) {
             if(currentTime - localGroupNodePair.second.recentTime >= heartbeatTimeout) {
