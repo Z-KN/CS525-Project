@@ -310,7 +310,7 @@ public:
     }
 
     void triggerReceive() {
-        clientSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
+        recvSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
     }
 
     void onAccept(Ptr<Socket> s, const Address& from) {
@@ -398,17 +398,18 @@ private:
     // Hook to whenever data is received
     // For some reason this callback does not work
     void ReceiveData(Ptr<Socket> socket) {
-        NS_LOG_INFO("testing");
         Ptr<Packet> packet = socket->Recv();
         uint32_t dataSize = packet->GetSize();
         uint8_t buffer[dataSize];
         packet->CopyData(buffer, dataSize);
         NS_LOG_INFO("Received data from " << socket->GetNode()->GetId());
-         
+        NS_LOG_INFO("Data Size: " << sizeof(buffer) << " vs " << dataSize); 
         // because of how we serialize, the first byte is the message type 
         if(buffer[0] == ADVERT) {
+            NS_LOG_INFO("Received ADVERTISEMENT"); 
             std::vector<uint8_t> vectorized_buffer(buffer[0], buffer[0] + sizeof(buffer)/sizeof(buffer[0]));
             ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
+            NS_LOG_INFO(info);
             nodeEntry thisNode(Ipv4Address(info.ipv4Address), Simulator::Now().GetMilliSeconds());
             for(size_t idx = 0; idx < info.elements.size(); idx++) {
                 if(nearbyElements.count(info.elements.at(idx)) == 1) {
@@ -466,6 +467,7 @@ private:
         uint32_t ipv4_num = address.Get();
         ADVERT_Message adv(node_id, ipv4_num, &nearbyElements, &AgreementInformation_vec);
         
+        NS_LOG_INFO(adv);
         std::vector<uint8_t> mesg = adv.serialize();
         Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
         clientSocket->Send(packet);
@@ -542,18 +544,17 @@ int main(int argc, char *argv[]) {
     NodeContainer nodes;
     nodes.Create(2);  
 
-    InternetStackHelper internet;
-    internet.Install(nodes);
-
     PointToPointHelper p2p;
     p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
     p2p.SetChannelAttribute("Delay", StringValue("2ms"));
+
     NetDeviceContainer devices;
-
-
     devices = p2p.Install(nodes);
     NS_LOG_INFO("Testing");
 
+    InternetStackHelper internet;
+    internet.Install(nodes);
+    
     // IP address assignment 
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0"); 
@@ -574,8 +575,8 @@ int main(int argc, char *argv[]) {
     UdpSocketRecv -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
     
     uint16_t port = 8080;
-    Address client1Address(InetSocketAddress(interfaces.GetAddress(1), port));
-    Address client2Address(InetSocketAddress(interfaces.GetAddress(0), port));
+    Address client1Address(InetSocketAddress(interfaces.GetAddress(0), port));
+    Address client2Address(InetSocketAddress(interfaces.GetAddress(1), port));
 
     MobilityHelper mobility;
 
@@ -593,10 +594,7 @@ int main(int argc, char *argv[]) {
                                   "LayoutType",
                                   StringValue("RowFirst"));
 
-    mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel",
-                              "Bounds",
-                              RectangleValue(Rectangle(-50, 50, -50, 50)),
-                              "Speed", StringValue ("ns3::ConstantRandomVariable[Constant=1.0]"));
+    mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
     mobility.Install(nodes);
     
     clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
@@ -608,8 +606,8 @@ int main(int argc, char *argv[]) {
 
     Ptr<EdgeAwareClientApplication> clientApp2 = CreateObject<EdgeAwareClientApplication>();
     Ptr<Socket> UdpSocket2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
-    Ptr<Socket> UdpSocketRecv2 = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
-    UdpSocketRecv2 -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
+    Ptr<Socket> UdpSocketRecv2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
+    UdpSocketRecv2 -> Bind(InetSocketAddress(interfaces.GetAddress(1), 8080));
 
 
     clientApp2->Setup(UdpSocket2, UdpSocketRecv2, client1Address); // setup connection to 0th node
