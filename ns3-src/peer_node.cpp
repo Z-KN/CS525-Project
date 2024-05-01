@@ -56,17 +56,22 @@ private:
 };
 
 class nodeEntry {
-    public:
-        Ipv4Address address;
-        uint32_t recentTime;
-        std::vector<std::pair<causalNum_t, causalNum_t>> versionRoundNumbers;
+public:
+    Ipv4Address address;
+    int64_t recentTime;
+    std::vector<std::pair<causalNum_t, causalNum_t>> versionRoundNumbers;
 
-        nodeEntry(Ipv4Address ad, uint32_t time): address(ad), recentTime(time), versionRoundNumbers(5, std::pair<causalNum_t, causalNum_t>{0, 0}) {
+    nodeEntry(Ipv4Address ad, int64_t time): address(ad), recentTime(time), versionRoundNumbers(5, std::pair<causalNum_t, causalNum_t>{0, 0}) {
+    }
+
+    friend std::ostream& operator<< (std::ostream &os, nodeEntry &n) {
+        os << "Address: " << n.address << "\nHeartbeat Time: " << n.recentTime  << std::endl;
+        for(size_t idx = 0; idx < n.versionRoundNumbers.size(); idx++) {
+            os << "Element: " << unsigned(idx) << " Version: " << unsigned(n.versionRoundNumbers.at(idx).first) << " Round: " << unsigned(n.versionRoundNumbers.at(idx).first) << std::endl;
         }
-
-        
-    private:
-
+        return os;
+    } 
+private:
 };
 
 // undoing transformation, so endianness should not matter
@@ -81,10 +86,10 @@ std::vector<uint8_t> fourByteToOne(uint32_t c) {
 
 uint32_t oneByteToFour(std::vector<uint8_t> *c) {
     uint32_t r = 0;
-    r += c->at(0);
-    r += c->at(1) << 8;
-    r += c->at(2) << 16;
-    r += c->at(3) << 24;
+    r += (uint32_t)(c->at(0));
+    r += (uint32_t)(c->at(1)) << 8;
+    r += (uint32_t)(c->at(2)) << 16;
+    r += (uint32_t)(c->at(3)) << 24;
     return r;
 }
 
@@ -97,82 +102,82 @@ uint32_t oneByteToFour(std::vector<uint8_t> *c) {
  *
  */
 class ADVERT_Message {
-    public:
-        nodeId_t senderId;
-        uint32_t ipv4Address;
-        std::vector<elementId_t> elements;
-        std::vector<causalNum_t> versions;
-        std::vector<causalNum_t> rounds;
+public:
+    nodeId_t senderId;
+    uint32_t ipv4Address;
+    std::vector<elementId_t> elements;
+    std::vector<causalNum_t> versions;
+    std::vector<causalNum_t> rounds;
 
-        ADVERT_Message(nodeId_t id, uint32_t ad, std::set<elementId_t> *nearbyElements, std::vector<AgreementInformation> *elementInfo): 
-            senderId(id), ipv4Address(ad) 
-        { 
-            // initialize the lists of information that are propagated with the advertisement
-            elements.reserve(nearbyElements->size());
-            versions.reserve(nearbyElements->size());
-            rounds.reserve(nearbyElements->size());
-            for(elementId_t element : *nearbyElements) {
-                elements.push_back(element);
-                versions.push_back(elementInfo->at(element).versionNumber);
-                rounds.push_back(elementInfo->at(element).roundNumber);
-            }     
+    ADVERT_Message(nodeId_t id, uint32_t ad, std::set<elementId_t> *nearbyElements, std::vector<AgreementInformation> *elementInfo): 
+        senderId(id), ipv4Address(ad) 
+    { 
+        // initialize the lists of information that are propagated with the advertisement
+        elements.reserve(nearbyElements->size());
+        versions.reserve(nearbyElements->size());
+        rounds.reserve(nearbyElements->size());
+        for(elementId_t element : *nearbyElements) {
+            elements.push_back(element);
+            versions.push_back(elementInfo->at(element).versionNumber);
+            rounds.push_back(elementInfo->at(element).roundNumber);
+        }     
+    }
+
+    // alternative constructor for deserialization
+    ADVERT_Message(nodeId_t id, uint32_t ad, std::vector<elementId_t> *elems, std::vector<causalNum_t> *vers, std::vector<causalNum_t> *rnds): 
+        senderId(id), ipv4Address(ad) 
+    {
+        elements = *elems;
+        versions = *vers;
+        rounds = *rnds;
+    }
+    std::vector<uint8_t> serialize() {
+        std::vector<uint8_t> mesg{ADVERT};
+        std::vector<uint8_t> id_array = fourByteToOne(this->senderId);
+        mesg.insert(mesg.end(), id_array.begin(), id_array.end());
+        std::vector<uint8_t> ip_array = fourByteToOne(this->ipv4Address);
+        mesg.insert(mesg.end(), ip_array.begin(), ip_array.end());
+        
+        for(size_t idx = 0; idx < elements.size(); idx++) {
+            mesg.push_back(this->elements.at(idx));
+            mesg.push_back(this->versions.at(idx));
+            mesg.push_back(this->rounds.at(idx));
         }
 
-        // alternative constructor for deserialization
-        ADVERT_Message(nodeId_t id, uint32_t ad, std::vector<elementId_t> *elems, std::vector<causalNum_t> *vers, std::vector<causalNum_t> *rnds): 
-            senderId(id), ipv4Address(ad) 
-        {
-            elements = *elems;
-            versions = *vers;
-            rounds = *rnds;
-        }
-        std::vector<uint8_t> serialize() {
-            std::vector<uint8_t> mesg{ADVERT};
-            std::vector<uint8_t> id_array = fourByteToOne(this->senderId);
-            mesg.insert(mesg.end(), id_array.begin(), id_array.end());
-            std::vector<uint8_t> ip_array = fourByteToOne(this->ipv4Address);
-            mesg.insert(mesg.end(), ip_array.begin(), ip_array.end());
-            
-            for(size_t idx = 0; idx < elements.size(); idx++) {
-                mesg.push_back(this->elements.at(idx));
-                mesg.push_back(this->versions.at(idx));
-                mesg.push_back(this->rounds.at(idx));
-            }
+        return mesg;
+    }
 
-            return mesg;
+    static ADVERT_Message deserialize(std::vector<uint8_t> *buf) {
+        std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
+        nodeId_t otherId = oneByteToFour(&oid);
+        std::vector<uint8_t> oip(buf->begin() + 5, buf->begin() + 9);
+        // if we had two interfaces, these steps would be useful. for now, though, they're just here
+        uint32_t otherIP = oneByteToFour(&oip);
+        std::vector<elementId_t> otherElements;
+        otherElements.reserve((buf->size()-9)/3);
+        std::vector<elementId_t> otherVersions;
+        otherVersions.reserve(otherElements.size());
+        std::vector<elementId_t> otherRounds;
+        otherRounds.reserve(otherElements.size());
+        for(size_t idx = 9; idx < buf->size(); idx+=3) {
+            // recall that the message is structured as:
+            // element id - version number - round number
+            otherElements.push_back(buf->at(idx));
+            otherVersions.push_back(buf->at(idx+1));
+            otherRounds.push_back(buf->at(idx+2));
         }
+        return ADVERT_Message(otherId, otherIP, &otherElements, &otherVersions, &otherRounds);
+    }
 
-        static ADVERT_Message deserialize(std::vector<uint8_t> *buf) {
-            std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
-            nodeId_t otherId = oneByteToFour(&oid);
-            std::vector<uint8_t> oip(buf->begin() + 5, buf->begin() + 9);
-            // if we had two interfaces, these steps would be useful. for now, though, they're just here
-            uint32_t otherIP = oneByteToFour(&oip);
-            std::vector<elementId_t> otherElements;
-            otherElements.reserve((buf->size()-9)/3);
-            std::vector<elementId_t> otherVersions;
-            otherVersions.reserve(otherElements.size());
-            std::vector<elementId_t> otherRounds;
-            otherRounds.reserve(otherElements.size());
-            for(size_t idx = 9; idx < buf->size(); idx+=3) {
-                // recall that the message is structured as:
-                // element id - version number - round number
-                otherElements.push_back(buf->at(idx));
-                otherVersions.push_back(buf->at(idx+1));
-                otherRounds.push_back(buf->at(idx+2));
-            }
-            return ADVERT_Message(otherId, otherIP, &otherElements, &otherVersions, &otherRounds);
+    friend std::ostream& operator<< (std::ostream &os, ADVERT_Message &a) {
+        os << "Id: " << unsigned(a.senderId) << "\nAddress: " << unsigned(a.ipv4Address)  << std::endl;
+        for(size_t idx = 0; idx < a.elements.size(); idx++) {
+            os << "Element: " << unsigned(a.elements.at(idx)) << " Version: " << unsigned(a.versions.at(idx)) << " Round: " << unsigned(a.rounds.at(idx)) << std::endl;
         }
+        return os;
+    }
 
-        friend std::ostream& operator<< (std::ostream &os, ADVERT_Message &a) {
-            os << "Id: " << unsigned(a.senderId) << "\nAddress: " << unsigned(a.ipv4Address)  << std::endl;
-            for(size_t idx = 0; idx < a.elements.size(); idx++) {
-                os << "Element: " << unsigned(a.elements.at(idx)) << " Version: " << unsigned(a.versions.at(idx)) << " Round: " << unsigned(a.rounds.at(idx)) << std::endl;
-            }
-            return os;
-        }
-
-    private:
+private:
 
 };
 
@@ -183,27 +188,27 @@ class ADVERT_Message {
  *
  */
 class REQUEST_DATA_Message {
-    public:
-        nodeId_t senderId;
-        elementId_t elementId;
+public:
+    nodeId_t senderId;
+    elementId_t elementId;
 
-        REQUEST_DATA_Message(nodeId_t nid, elementId_t eid): senderId(nid), elementId(eid) {
-        }
+    REQUEST_DATA_Message(nodeId_t nid, elementId_t eid): senderId(nid), elementId(eid) {
+    }
 
-        std::vector<uint8_t> serialize() { 
-            std::vector<uint8_t> oid = fourByteToOne(this->senderId);
-            std::vector<uint8_t> mesg{REQUEST_DATA};
-            mesg.insert(mesg.end(), oid.begin(), oid.end());
-            mesg.push_back(this->elementId);
-            return mesg;
-        } 
+    std::vector<uint8_t> serialize() { 
+        std::vector<uint8_t> oid = fourByteToOne(this->senderId);
+        std::vector<uint8_t> mesg{REQUEST_DATA};
+        mesg.insert(mesg.end(), oid.begin(), oid.end());
+        mesg.push_back(this->elementId);
+        return mesg;
+    } 
 
-        static REQUEST_DATA_Message deserialize(std::vector<uint8_t> *buf) { 
-            std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
-            nodeId_t otherId = oneByteToFour(&oid);
-            elementId_t elid = buf->at(5);
-            return REQUEST_DATA_Message(otherId, elid);
-        }
+    static REQUEST_DATA_Message deserialize(std::vector<uint8_t> *buf) { 
+        std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
+        nodeId_t otherId = oneByteToFour(&oid);
+        elementId_t elid = buf->at(5);
+        return REQUEST_DATA_Message(otherId, elid);
+    }
 };
 
 /* FORMAT
@@ -219,79 +224,79 @@ class REQUEST_DATA_Message {
  *
  */
 class SEND_DATA_Message {
-    public:
-        nodeId_t senderId;
-        elementId_t elementId;
-        location_t xpos, ypos;
-        causalNum_t version, round;
+public:
+    nodeId_t senderId;
+    elementId_t elementId;
+    location_t xpos, ypos;
+    causalNum_t version, round;
 
-        std::vector<nodeId_t> sync_group;
+    std::vector<nodeId_t> sync_group;
 
-        SEND_DATA_Message(nodeId_t nid, 
-                elementId_t eid, 
-                location_t x, 
-                location_t y, 
-                causalNum_t ver,
-                causalNum_t rnd,
-                std::set<nodeId_t> *sg): 
-            senderId(nid), elementId(eid), xpos(x), ypos(y), version(ver), round(rnd), sync_group(sg->size())
-        {
-            sync_group.assign(sg->begin(), sg->end());
+    SEND_DATA_Message(nodeId_t nid, 
+            elementId_t eid, 
+            location_t x, 
+            location_t y, 
+            causalNum_t ver,
+            causalNum_t rnd,
+            std::set<nodeId_t> *sg): 
+        senderId(nid), elementId(eid), xpos(x), ypos(y), version(ver), round(rnd), sync_group(sg->size())
+    {
+        sync_group.assign(sg->begin(), sg->end());
+    }
+
+    std::vector<uint8_t> serialize() { 
+        std::vector<uint8_t> mesg{SEND_DATA};
+        std::vector<uint8_t> oid = fourByteToOne(this->senderId);
+        mesg.insert(mesg.end(), oid.begin(), oid.end());
+        mesg.push_back(this->elementId);
+        
+        uint32_t serialized_xpos = *reinterpret_cast<uint32_t*>(&this->xpos);
+        uint32_t serialized_ypos = *reinterpret_cast<uint32_t*>(&this->ypos);
+        
+        std::vector<uint8_t> packed_x = fourByteToOne(serialized_xpos);
+        std::vector<uint8_t> packed_y = fourByteToOne(serialized_ypos);
+
+        mesg.insert(mesg.end(), packed_x.begin(), packed_x.end());
+        mesg.insert(mesg.end(), packed_y.begin(), packed_y.begin());
+
+        mesg.push_back(this->version);
+        mesg.push_back(this->round);
+
+        for(nodeId_t nodeId : this->sync_group) {
+            std::vector<uint8_t> id = fourByteToOne(nodeId);
+            mesg.insert(mesg.end(), id.begin(), id.end());
+        }
+            
+        return mesg;
+    } 
+
+    static SEND_DATA_Message deserialize(std::vector<uint8_t> *buf) {  
+        std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
+        nodeId_t otherId = oneByteToFour(&oid);
+        
+        elementId_t elid = buf->at(5);
+
+        std::vector<uint8_t> px(buf->begin() + 6, buf->begin() + 10);
+        std::vector<uint8_t> py(buf->begin() + 10, buf->begin() + 14);
+        
+        uint32_t packed_x = oneByteToFour(&px);
+        uint32_t packed_y = oneByteToFour(&px);
+
+        location_t xpos = *reinterpret_cast<location_t*>(&packed_x);
+        location_t ypos = *reinterpret_cast<location_t*>(&packed_y);
+
+        causalNum_t vers = buf->at(14);
+        causalNum_t rnd = buf->at(15);
+
+        std::set<nodeId_t> sync_group;
+        for(size_t idx = 16; idx < buf->size(); idx+=4) {
+            std::vector<uint8_t> syn(buf->begin() + idx, buf->begin() + idx + 3);
+            nodeId_t sync_nodeId = oneByteToFour(&syn);
+            sync_group.insert(sync_nodeId);
         }
 
-        std::vector<uint8_t> serialize() { 
-            std::vector<uint8_t> mesg{SEND_DATA};
-            std::vector<uint8_t> oid = fourByteToOne(this->senderId);
-            mesg.insert(mesg.end(), oid.begin(), oid.end());
-            mesg.push_back(this->elementId);
-            
-            uint32_t serialized_xpos = *reinterpret_cast<uint32_t*>(&this->xpos);
-            uint32_t serialized_ypos = *reinterpret_cast<uint32_t*>(&this->ypos);
-            
-            std::vector<uint8_t> packed_x = fourByteToOne(serialized_xpos);
-            std::vector<uint8_t> packed_y = fourByteToOne(serialized_ypos);
-
-            mesg.insert(mesg.end(), packed_x.begin(), packed_x.end());
-            mesg.insert(mesg.end(), packed_y.begin(), packed_y.begin());
-
-            mesg.push_back(this->version);
-            mesg.push_back(this->round);
-
-            for(nodeId_t nodeId : this->sync_group) {
-                std::vector<uint8_t> id = fourByteToOne(nodeId);
-                mesg.insert(mesg.end(), id.begin(), id.end());
-            }
-                
-            return mesg;
-        } 
-
-        static SEND_DATA_Message deserialize(std::vector<uint8_t> *buf) {  
-            std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
-            nodeId_t otherId = oneByteToFour(&oid);
-            
-            elementId_t elid = buf->at(5);
-
-            std::vector<uint8_t> px(buf->begin() + 6, buf->begin() + 10);
-            std::vector<uint8_t> py(buf->begin() + 10, buf->begin() + 14);
-            
-            uint32_t packed_x = oneByteToFour(&px);
-            uint32_t packed_y = oneByteToFour(&px);
-
-            location_t xpos = *reinterpret_cast<location_t*>(&packed_x);
-            location_t ypos = *reinterpret_cast<location_t*>(&packed_y);
-
-            causalNum_t vers = buf->at(14);
-            causalNum_t rnd = buf->at(15);
-
-            std::set<nodeId_t> sync_group;
-            for(size_t idx = 16; idx < buf->size(); idx+=4) {
-                std::vector<uint8_t> syn(buf->begin() + idx, buf->begin() + idx + 3);
-                nodeId_t sync_nodeId = oneByteToFour(&syn);
-                sync_group.insert(sync_nodeId);
-            }
-
-            return SEND_DATA_Message(otherId, elid, xpos, ypos, vers, rnd, &sync_group);
-        }
+        return SEND_DATA_Message(otherId, elid, xpos, ypos, vers, rnd, &sync_group);
+    }
 };
 
 class EdgeAwareClientApplication : public ns3::Application {
@@ -402,12 +407,11 @@ private:
         uint32_t dataSize = packet->GetSize();
         uint8_t buffer[dataSize];
         packet->CopyData(buffer, dataSize);
-        NS_LOG_INFO("Received data from " << socket->GetNode()->GetId());
-        NS_LOG_INFO("Data Size: " << sizeof(buffer) << " vs " << dataSize); 
+        NS_LOG_INFO("" << node_id << " received data");
         // because of how we serialize, the first byte is the message type 
         if(buffer[0] == ADVERT) {
-            NS_LOG_INFO("Received ADVERTISEMENT"); 
-            std::vector<uint8_t> vectorized_buffer(buffer[0], buffer[0] + sizeof(buffer)/sizeof(buffer[0]));
+            NS_LOG_INFO("Received advertisement");
+            std::vector<uint8_t> vectorized_buffer(buffer, buffer + sizeof(buffer)/sizeof(buffer[0])); 
             ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
             NS_LOG_INFO(info);
             nodeEntry thisNode(Ipv4Address(info.ipv4Address), Simulator::Now().GetMilliSeconds());
@@ -423,24 +427,34 @@ private:
                     }
                 }
             }
+            localGroup.insert_or_assign(info.senderId, thisNode);
         }
         // SETTLE LOCAL GROUPS FIRST >>>
-        if(buffer[0] == REQUEST_DATA) {
+        else if(buffer[0] == REQUEST_DATA) {
             //
         }
-        if(buffer[0] == SEND_DATA) { 
+        else if(buffer[0] == SEND_DATA) { 
             //MergeSyncGroups();
             //SendACK(senderIpv4Address);
         }
-        if(buffer[0] == ACK) {
+        else if(buffer[0] == ACK) {
             //MergeSyncGroups();
         }
+        else {
+            NS_LOG_INFO("INVALID MESSAGE");
+        }
+
+        for(auto elem : localGroup) {
+            NS_LOG_INFO(elem.second);
+        }
         // <<<
-        
+       
+       /* 
         Address senderAddress;
         socket->GetPeerName(senderAddress);
         Ipv4Address senderIpv4Address = InetSocketAddress::ConvertFrom(senderAddress).GetIpv4();
         std::cout << "Received data from " << senderIpv4Address << ": " << buffer << std::endl;
+        */
     }
 
     // this function runs every five seconds, and iterates over the list of nodes
@@ -469,8 +483,11 @@ private:
         
         NS_LOG_INFO(adv);
         std::vector<uint8_t> mesg = adv.serialize();
-        Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
+
+        Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
         clientSocket->Send(packet);
+
+        sendEvent = Simulator::Schedule(Time("1s"), &EdgeAwareClientApplication::SendAdvertisement, this);
     }
 
     /* SETTLE LOCAL GROUPS FIRST */
