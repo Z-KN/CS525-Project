@@ -7,6 +7,8 @@
 #include "ns3/udp-echo-helper.h"
 #include "ns3/mobility-module.h"
 #include "ns3/mobility-helper.h"
+#include "ns3/ssid.h"
+#include "ns3/yans-wifi-helper.h"
 
 #include <iomanip>
 
@@ -43,12 +45,12 @@ public:
     }
 
     friend std::ostream& operator<< (std::ostream &os, AgreementInformation &a) {
-        os << "Version: " << unsigned(a.versionNumber) << "\nRound: " << unsigned(a.roundNumber)  << std::endl;
-        os << "Location: (" << a.fineLocation.first << ", " << a.fineLocation.second << ")\n";
-        os << "Agreements:\n";
-        for(nodeId_t elem : a.agreeingNodes) {
-            os << elem << std::endl;
-        }
+        // os << "Version: " << unsigned(a.versionNumber) << "\nRound: " << unsigned(a.roundNumber)  << std::endl;
+        // os << "Location: (" << a.fineLocation.first << ", " << a.fineLocation.second << ")\n";
+        // os << "Agreements:\n";
+        // for(nodeId_t elem : a.agreeingNodes) {
+        //     os << elem << std::endl;
+        // }
 
         return os << std::endl;
     }
@@ -407,10 +409,10 @@ private:
         uint32_t dataSize = packet->GetSize();
         uint8_t buffer[dataSize];
         packet->CopyData(buffer, dataSize);
-        NS_LOG_INFO("" << node_id << " received data");
+        // NS_LOG_INFO("" << node_id << " received data");
         // because of how we serialize, the first byte is the message type 
         if(buffer[0] == ADVERT) {
-            NS_LOG_INFO("Received advertisement");
+            // NS_LOG_INFO("Received advertisement");
             std::vector<uint8_t> vectorized_buffer(buffer, buffer + sizeof(buffer)/sizeof(buffer[0])); 
             ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
             NS_LOG_INFO(info);
@@ -477,7 +479,7 @@ private:
     void SendAdvertisement() {
         Ptr<Ipv4> ipv4 = GetNode()->GetObject<Ipv4>();
         Ipv4Address address = ipv4->GetAddress(1, 0).GetLocal();
-        NS_LOG_INFO("Sending advertisement");
+        // NS_LOG_INFO("Sending advertisement");
         uint32_t ipv4_num = address.Get();
         ADVERT_Message adv(node_id, ipv4_num, &nearbyElements, &AgreementInformation_vec);
         
@@ -565,19 +567,37 @@ int main(int argc, char *argv[]) {
     p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
     p2p.SetChannelAttribute("Delay", StringValue("2ms"));
 
-    NetDeviceContainer devices;
-    devices = p2p.Install(nodes);
-    NS_LOG_INFO("Testing");
+    // Setup wifi channels
+    YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
+    YansWifiPhyHelper phy;
+    phy.SetChannel(channel.Create());
 
-    InternetStackHelper internet;
-    internet.Install(nodes);
+
+    // Setup wifi ssid nodes
+    WifiMacHelper mac;
+    Ssid ssid = Ssid("clients");
+
+    WifiHelper wifi;
+
+    NetDeviceContainer devices;
+    mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+    devices = wifi.Install(phy, mac, nodes);
+
+
+    InternetStackHelper stack;
+
+    stack.Install(nodes);
+    // NetDeviceContainer devices;
+    // devices = p2p.Install(nodes);
+
+    // InternetStackHelper internet;
+    // internet.Install(nodes);
     
     // IP address assignment 
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0"); 
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
-    p2p.EnablePcapAll("peer-to-peer"); 
 
     // uint16_t port = 9; 
 
@@ -612,7 +632,26 @@ int main(int argc, char *argv[]) {
                                   StringValue("RowFirst"));
 
     mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    mobility.Install(nodes);
+    mobility.Install(nodes.Get(0));
+
+    MobilityHelper mobility2;
+
+    mobility2.SetPositionAllocator("ns3::GridPositionAllocator",
+                                  "MinX",
+                                  DoubleValue(0.0),
+                                  "MinY",
+                                  DoubleValue(0.0),
+                                  "DeltaX",
+                                  DoubleValue(-5.0),
+                                  "DeltaY",
+                                  DoubleValue(10.0),
+                                  "GridWidth",
+                                  UintegerValue(3),
+                                  "LayoutType",
+                                  StringValue("RowFirst"));
+    mobility2.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
+    mobility2.Install(nodes.Get(1));
+
     
     clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
     nodes.Get(0)->AddApplication(clientApp1);
@@ -631,14 +670,18 @@ int main(int argc, char *argv[]) {
     nodes.Get(1)->AddApplication(clientApp2);
     clientApp2->SetStartTime(Seconds(1.0));
     clientApp2->SetStopTime(Seconds(10.0));
-
+    Simulator::Stop(Seconds(10.0));
     clientApp2->triggerReceive();
     // Enable global static routing
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
 
+
+    phy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
+    phy.EnablePcap("edge-aware", devices);
     // Run simulation
     Simulator::Run();
     Simulator::Destroy();
+
 
     return 0;
 }
