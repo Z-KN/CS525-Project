@@ -32,29 +32,49 @@ typedef float location_t;
 
 // EVAN Addition >>>
 class AgreementInformation {
-public:
-    causalNum_t versionNumber, roundNumber;
-    // i picked float because they're 32 bit
-    // no coarse location, as our system uses the same data type for both fine and coarse locations
-    std::pair<location_t, location_t> fineLocation;
-    std::set<nodeId_t> agreeingNodes;
-    
+public: 
     AgreementInformation(std::pair<location_t, location_t>* cl, nodeId_t id): versionNumber(0), roundNumber(0) {
         fineLocation = *cl;
         agreeingNodes.insert(id);
     }
 
-    friend std::ostream& operator<< (std::ostream &os, AgreementInformation &a) {
-        // os << "Version: " << unsigned(a.versionNumber) << "\nRound: " << unsigned(a.roundNumber)  << std::endl;
-        // os << "Location: (" << a.fineLocation.first << ", " << a.fineLocation.second << ")\n";
-        // os << "Agreements:\n";
-        // for(nodeId_t elem : a.agreeingNodes) {
-        //     os << elem << std::endl;
-        // }
+    void set_version(causalNum_t v) { versionNumber = v; }
+    causalNum_t get_version() { return versionNumber; }
 
-        return os << std::endl;
+    void set_round(causalNum_t r) { roundNumber = r; }
+    causalNum_t get_round() { return roundNumber; }
+
+    void set_fineLocation(std::pair<location_t, location_t> *fl) {
+        fineLocation.first = fl->first;
+        fineLocation.second = fl->second;
+    }
+    std::pair<location_t, location_t> get_fineLocation() { return fineLocation; } 
+
+
+    bool add_agreeingNodes(nodeId_t n) { return agreeingNodes.insert(n).second; }
+    void set_agreeingNodes(std::set<nodeId_t> *ag) { 
+        agreeingNodes.clear();
+        agreeingNodes.insert(ag->begin(), ag->end());
+    }
+    bool count_agreeingNodes(nodeId_t n) { return agreeingNodes.count(n) == 1; }
+    std::set<nodeId_t> get_agreeingNodes() { return agreeingNodes; }
+    void clear_agreeingNodes() { agreeingNodes.clear(); }
+
+    friend std::ostream& operator<< (std::ostream &os, AgreementInformation &a) {
+        os << "Version: " << unsigned(a.versionNumber) << "\nRound: " << unsigned(a.roundNumber)  << std::endl;
+        os << "Location: (" << a.fineLocation.first << ", " << a.fineLocation.second << ")\n";
+        os << "Synchronized Nodes:\n";
+        for(nodeId_t elem : a.agreeingNodes) {
+            os << elem << std::endl;
+        }
+
+        return os;
     }
 private:
+    causalNum_t versionNumber, roundNumber;
+    // no coarse location, as our system uses the same data type for both fine and coarse locations
+    std::pair<location_t, location_t> fineLocation;
+    std::set<nodeId_t> agreeingNodes;
 };
 
 class nodeEntry {
@@ -120,8 +140,8 @@ public:
         rounds.reserve(nearbyElements->size());
         for(elementId_t element : *nearbyElements) {
             elements.push_back(element);
-            versions.push_back(elementInfo->at(element).versionNumber);
-            rounds.push_back(elementInfo->at(element).roundNumber);
+            versions.push_back(elementInfo->at(element).get_version());
+            rounds.push_back(elementInfo->at(element).get_round());
         }     
     }
 
@@ -152,15 +172,19 @@ public:
     static ADVERT_Message deserialize(std::vector<uint8_t> *buf) {
         std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
         nodeId_t otherId = oneByteToFour(&oid);
+        
         std::vector<uint8_t> oip(buf->begin() + 5, buf->begin() + 9);
-        // if we had two interfaces, these steps would be useful. for now, though, they're just here
         uint32_t otherIP = oneByteToFour(&oip);
+        
         std::vector<elementId_t> otherElements;
         otherElements.reserve((buf->size()-9)/3);
+        
         std::vector<elementId_t> otherVersions;
         otherVersions.reserve(otherElements.size());
+        
         std::vector<elementId_t> otherRounds;
         otherRounds.reserve(otherElements.size());
+        
         for(size_t idx = 9; idx < buf->size(); idx+=3) {
             // recall that the message is structured as:
             // element id - version number - round number
@@ -193,10 +217,10 @@ class REQUEST_DATA_Message {
 public:
     nodeId_t senderId;
     elementId_t elementId;
-
+  
     REQUEST_DATA_Message(nodeId_t nid, elementId_t eid): senderId(nid), elementId(eid) {
     }
-
+  
     std::vector<uint8_t> serialize() { 
         std::vector<uint8_t> oid = fourByteToOne(this->senderId);
         std::vector<uint8_t> mesg{REQUEST_DATA};
@@ -204,15 +228,19 @@ public:
         mesg.push_back(this->elementId);
         return mesg;
     } 
-
+  
     static REQUEST_DATA_Message deserialize(std::vector<uint8_t> *buf) { 
         std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
         nodeId_t otherId = oneByteToFour(&oid);
         elementId_t elid = buf->at(5);
         return REQUEST_DATA_Message(otherId, elid);
     }
+    
+    friend std::ostream& operator<< (std::ostream &os, REQUEST_DATA_Message &r) {
+        os << "Id: " << unsigned(r.senderId) << "\nElement: " << unsigned(r.elementId)  << std::endl;
+        return os;
+    }
 };
-
 /* FORMAT
  * |type    |nodeid  |element |
  * |x pos   |y pos   |
@@ -231,73 +259,110 @@ public:
     elementId_t elementId;
     location_t xpos, ypos;
     causalNum_t version, round;
-
+  
     std::vector<nodeId_t> sync_group;
-
-    SEND_DATA_Message(nodeId_t nid, 
-            elementId_t eid, 
-            location_t x, 
-            location_t y, 
+  
+    SEND_DATA_Message(nodeId_t nid,
+            elementId_t eid,
+            location_t x,
+            location_t y,
             causalNum_t ver,
             causalNum_t rnd,
-            std::set<nodeId_t> *sg): 
+            std::set<nodeId_t> *sg):
         senderId(nid), elementId(eid), xpos(x), ypos(y), version(ver), round(rnd), sync_group(sg->size())
     {
         sync_group.assign(sg->begin(), sg->end());
     }
-
-    std::vector<uint8_t> serialize() { 
+  
+    std::vector<uint8_t> serialize() {
         std::vector<uint8_t> mesg{SEND_DATA};
         std::vector<uint8_t> oid = fourByteToOne(this->senderId);
         mesg.insert(mesg.end(), oid.begin(), oid.end());
         mesg.push_back(this->elementId);
-        
+  
         uint32_t serialized_xpos = *reinterpret_cast<uint32_t*>(&this->xpos);
         uint32_t serialized_ypos = *reinterpret_cast<uint32_t*>(&this->ypos);
-        
+  
         std::vector<uint8_t> packed_x = fourByteToOne(serialized_xpos);
         std::vector<uint8_t> packed_y = fourByteToOne(serialized_ypos);
-
+  
         mesg.insert(mesg.end(), packed_x.begin(), packed_x.end());
-        mesg.insert(mesg.end(), packed_y.begin(), packed_y.begin());
-
+        mesg.insert(mesg.end(), packed_y.begin(), packed_y.end());
+  
         mesg.push_back(this->version);
         mesg.push_back(this->round);
-
+  
         for(nodeId_t nodeId : this->sync_group) {
             std::vector<uint8_t> id = fourByteToOne(nodeId);
             mesg.insert(mesg.end(), id.begin(), id.end());
         }
-            
+  
         return mesg;
-    } 
-
-    static SEND_DATA_Message deserialize(std::vector<uint8_t> *buf) {  
+      }
+    static SEND_DATA_Message deserialize(std::vector<uint8_t> *buf) {
         std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
         nodeId_t otherId = oneByteToFour(&oid);
-        
+  
         elementId_t elid = buf->at(5);
-
+  
         std::vector<uint8_t> px(buf->begin() + 6, buf->begin() + 10);
         std::vector<uint8_t> py(buf->begin() + 10, buf->begin() + 14);
-        
+  
         uint32_t packed_x = oneByteToFour(&px);
-        uint32_t packed_y = oneByteToFour(&px);
-
+        uint32_t packed_y = oneByteToFour(&py);
+  
         location_t xpos = *reinterpret_cast<location_t*>(&packed_x);
         location_t ypos = *reinterpret_cast<location_t*>(&packed_y);
-
+  
         causalNum_t vers = buf->at(14);
         causalNum_t rnd = buf->at(15);
-
+  
         std::set<nodeId_t> sync_group;
         for(size_t idx = 16; idx < buf->size(); idx+=4) {
-            std::vector<uint8_t> syn(buf->begin() + idx, buf->begin() + idx + 3);
+            std::vector<uint8_t> syn(buf->begin() + idx, buf->begin() + idx + 4);
             nodeId_t sync_nodeId = oneByteToFour(&syn);
             sync_group.insert(sync_nodeId);
         }
-
         return SEND_DATA_Message(otherId, elid, xpos, ypos, vers, rnd, &sync_group);
+    }
+    
+    friend std::ostream& operator<< (std::ostream &os, SEND_DATA_Message &s) {
+            os << "Id: " << unsigned(s.senderId) << "\nElement: " << unsigned(s.elementId)  << std::endl;
+            os << "Location: (" << s.xpos << ", " << s.ypos << ")\n";
+            os << "Version: " << unsigned(s.version) << " Round: " << unsigned(s.round) << std::endl;
+            for(nodeId_t elem : s.sync_group) {
+                os << "Node: " << elem << std::endl;
+            }
+            return os;
+        }
+};
+
+class ACK_Message {
+public:
+    nodeId_t senderId;
+    elementId_t elementId;
+  
+    ACK_Message(nodeId_t nid, elementId_t eid): senderId(nid), elementId(eid) {
+    }
+  
+    std::vector<uint8_t> serialize() { 
+        std::vector<uint8_t> oid = fourByteToOne(this->senderId);
+        std::vector<uint8_t> mesg{ACK};
+        mesg.insert(mesg.end(), oid.begin(), oid.end());
+        mesg.push_back(this->elementId);
+        return mesg;
+    } 
+  
+    static ACK_Message deserialize(std::vector<uint8_t> *buf) { 
+        std::vector<uint8_t> oid(buf->begin() + 1, buf->begin() + 5);
+        nodeId_t otherId = oneByteToFour(&oid);
+        elementId_t elid = buf->at(5);
+        return ACK_Message(otherId, elid);
+    }
+    
+    friend std::ostream& operator<< (std::ostream &os, ACK_Message &a) {
+        os << "Id: " << unsigned(a.senderId) << "\nElement: " << unsigned(a.elementId)  << std::endl;
+        return os;
     }
 };
 
@@ -326,16 +391,10 @@ public:
     }
 
     // All the setup for the ports and sockets done here
-    virtual void StartApplication() {
+    void StartApplication() {
         Ptr<Node> node = GetNode();
-        // EVAN Addition >>>
         node_id = node->GetId();
-        
-        NS_LOG_INFO(node_id);
 
-        // uniform noise generator, seeded on node id
-        RngSeedManager::SetSeed(node_id + 1);
-        
         auto unif_rv = CreateObject<UniformRandomVariable>(); 
         unif_rv->SetAttribute("Min", DoubleValue(-1.0));
         unif_rv->SetAttribute("Max", DoubleValue(1.0));
@@ -345,19 +404,25 @@ public:
         // they can be changed to be reasonable regarding how the mobility client organizes
         // (via setPositionAllocator)
 
+        auto gps_noise = CreateObject<UniformRandomVariable>();
+        gps_noise->SetAttribute("Min", DoubleValue(-1));
+        unif_rv->SetAttribute("Max", DoubleValue(1));
+
         std::vector<std::pair<location_t, location_t>> baseElementLocations{
-            {5.0f, 3.0f},
+            {5.0f, 11.0f},
             {2.0f, 8.0f},
             {6.0f, 13.0f},
             {10.0f, 18.0f},
             {12.0f, 5.0f}
         };
+        for(auto &elem : baseElementLocations) {
+            elem = std::pair<location_t, location_t>(elem.first + unif_rv->GetValue(), elem.second + unif_rv->GetValue());
+        }
         
         // each node intitializes their element table, along with noisy versions of the positions
         for(std::pair<location_t, location_t> &element : baseElementLocations) {
             AgreementInformation_vec.push_back(AgreementInformation(&element, node_id));
         } 
-        // EVAN Addition <<<
 
         recvSocket->Listen();
         recvSocket->SetAcceptCallback (
@@ -371,25 +436,35 @@ public:
         clientSocket->Connect(destination);
         
 
+        NS_LOG_INFO("Starting state for node " << node_id << ": ");
+        for(auto elem : AgreementInformation_vec) {
+            NS_LOG_INFO(elem);
+        }
+
         sendEvent = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::SendAdvertisement, this);
-        // EVAN: things we need to schedule
-        //pruneLocalGroup = Simulator::Schedule(Seconds(3), &EdgeAwareClientApplication::CheckHeartbeats, this);
-        //checkNearbyElements = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::GetNearbyElements, this);   
+        pruneLocalGroup = Simulator::Schedule(Seconds(3), &EdgeAwareClientApplication::CheckHeartbeats, this);
+        checkNearbyElements = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::GetNearbyElements, this);   
     }
 
-    virtual void StopApplication() {}
+    void StopApplication() {
+        // we need to unbind things here
+        NS_LOG_INFO("Ending state for node " << node_id << ": ");
+        for(auto elem : AgreementInformation_vec) {
+            NS_LOG_INFO(elem);
+        }
+    }
 
 private:
-    
     void GetNearbyElements() {
         Ptr<Node> node = GetNode();
         Vector3D nodePosition = node->GetObject<MobilityModel>()->GetPosition();
-        location_t distance = 5.0f;
+        // NS_LOG_INFO(nodePosition);
+        location_t distance = 8.0f;
         //iterate through the elements in the table, see which ones youre close to (according to AgreementInformation_vec.get(i).fineLocation), add them to nearbyElements
         //if you are far from an element, attempt to remove it from nearbyElements
         for(size_t idx = 0; idx < AgreementInformation_vec.size(); idx++) {
-            location_t xdiff = pow(AgreementInformation_vec.at(idx).fineLocation.first - nodePosition.x, 2);
-            location_t ydiff = pow(AgreementInformation_vec.at(idx).fineLocation.second - nodePosition.y, 2);
+            location_t xdiff = pow(AgreementInformation_vec.at(idx).get_fineLocation().first - nodePosition.x, 2);
+            location_t ydiff = pow(AgreementInformation_vec.at(idx).get_fineLocation().second - nodePosition.y, 2);
             if(xdiff + ydiff < pow(distance, 2)) {
                 if(nearbyElements.count(idx) == 0) {
                     BeginAgreement((elementId_t)idx);
@@ -399,64 +474,55 @@ private:
             else {
                 nearbyElements.erase((elementId_t) idx);
             }
-        } 
+        }
+        checkNearbyElements = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::GetNearbyElements, this);   
     }
+ 
+    /* SETTLE LOCAL GROUPS FIRST */
+    void BeginAgreement(elementId_t element) {
+        causalNum_t ourVersion = AgreementInformation_vec.at(element).get_version();
+        causalNum_t ourRound = AgreementInformation_vec.at(element).get_round();
+        
+        causalNum_t maxVersion = 0;
+        causalNum_t maxRound = 0;
+        nodeId_t bestNode = UINT32_MAX;
+        bool no_version = AgreementInformation_vec.at(element).get_round() == 0;
 
-    // Hook to whenever data is received
-    // For some reason this callback does not work
-    void ReceiveData(Ptr<Socket> socket) {
-        Ptr<Packet> packet = socket->Recv();
-        uint32_t dataSize = packet->GetSize();
-        uint8_t buffer[dataSize];
-        packet->CopyData(buffer, dataSize);
-        // NS_LOG_INFO("" << node_id << " received data");
-        // because of how we serialize, the first byte is the message type 
-        if(buffer[0] == ADVERT) {
-            // NS_LOG_INFO("Received advertisement");
-            std::vector<uint8_t> vectorized_buffer(buffer, buffer + sizeof(buffer)/sizeof(buffer[0])); 
-            ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
-            NS_LOG_INFO(info);
-            nodeEntry thisNode(Ipv4Address(info.ipv4Address), Simulator::Now().GetMilliSeconds());
-            for(size_t idx = 0; idx < info.elements.size(); idx++) {
-                if(nearbyElements.count(info.elements.at(idx)) == 1) {
-                    uint32_t ourVersion = AgreementInformation_vec.at(buffer[idx]).versionNumber;
-                    uint32_t ourRound = AgreementInformation_vec.at(buffer[idx]).roundNumber;
-                    
-                    uint32_t theirVersion = info.versions.at(idx);
-                    uint32_t theirRound = info.rounds.at(idx);
-                    if(ourVersion < theirVersion || (ourVersion == theirVersion && ourRound < theirRound)) {
-                        thisNode.versionRoundNumbers.at(info.elements.at(idx)) = std::pair<causalNum_t, causalNum_t>(theirVersion, theirRound);
-                    }
+        if(!localGroup.empty()) {
+            for(auto node : localGroup) {       
+                uint32_t theirVersion = node.second.versionRoundNumbers.at(element).first;
+                uint32_t theirRound = node.second.versionRoundNumbers.at(element).second;
+
+                if( theirVersion > maxVersion || (theirVersion == maxVersion && theirRound > maxRound) ) {
+                    maxVersion = theirVersion;
+                    maxRound = theirRound;
+                    bestNode = node.first;
                 }
             }
-            localGroup.insert_or_assign(info.senderId, thisNode);
-        }
-        // SETTLE LOCAL GROUPS FIRST >>>
-        else if(buffer[0] == REQUEST_DATA) {
-            //
-        }
-        else if(buffer[0] == SEND_DATA) { 
-            //MergeSyncGroups();
-            //SendACK(senderIpv4Address);
-        }
-        else if(buffer[0] == ACK) {
-            //MergeSyncGroups();
+            if(ourVersion < maxVersion || (ourVersion == maxVersion && ourRound < maxRound)) {
+                // NS_LOG_INFO("replacement found for element " << unsigned(element) << " from node " << bestNode);
+                SendDataRequest(localGroup.at(bestNode).address, element);
+            }
+            else {
+                // NS_LOG_INFO("replacement not found for element " << unsigned(element));
+                if(no_version) {
+
+                    auto unif_rv = CreateObject<UniformRandomVariable>();
+                    unif_rv->SetAttribute("Min", DoubleValue(1));
+                    unif_rv->SetAttribute("Max", DoubleValue(10));
+                    AgreementInformation_vec.at(element).set_round((causalNum_t)(unif_rv->GetInteger()));
+                }
+            }
         }
         else {
-            NS_LOG_INFO("INVALID MESSAGE");
+            // NS_LOG_INFO("element found, empty local group");
+            if(no_version) {
+                auto unif_rv = CreateObject<UniformRandomVariable>();
+                unif_rv->SetAttribute("Min", DoubleValue(1));
+                unif_rv->SetAttribute("Max", DoubleValue(10));
+                AgreementInformation_vec.at(element).set_round((causalNum_t)(unif_rv->GetInteger()));
+            }
         }
-
-        for(auto elem : localGroup) {
-            NS_LOG_INFO(elem.second);
-        }
-        // <<<
-       
-       /* 
-        Address senderAddress;
-        socket->GetPeerName(senderAddress);
-        Ipv4Address senderIpv4Address = InetSocketAddress::ConvertFrom(senderAddress).GetIpv4();
-        std::cout << "Received data from " << senderIpv4Address << ": " << buffer << std::endl;
-        */
     }
 
     // this function runs every five seconds, and iterates over the list of nodes
@@ -473,6 +539,88 @@ private:
         for(uint32_t key : deletionSet) {
             localGroup.erase(key);
         }
+        pruneLocalGroup = Simulator::Schedule(Seconds(3), &EdgeAwareClientApplication::CheckHeartbeats, this);
+    }
+
+    void ReceiveData(Ptr<Socket> socket) {
+        Ptr<Packet> packet = socket->Recv();
+        uint32_t dataSize = packet->GetSize();
+        uint8_t buffer[dataSize];
+        packet->CopyData(buffer, dataSize);
+        // NS_LOG_INFO("" << node_id << " received data");
+
+        // because of how we serialize, the first byte is the message type 
+        std::vector<uint8_t> vectorized_buffer(buffer, buffer + sizeof(buffer)/sizeof(buffer[0])); 
+        if(buffer[0] == ADVERT) {
+            NS_LOG_INFO("Received advertisement");
+            ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
+            // NS_LOG_INFO(info);
+            nodeEntry thisNode(Ipv4Address(info.ipv4Address), Simulator::Now().GetMilliSeconds());
+            bool queueBeginAgreement = false;
+            std::vector<elementId_t> agree;
+
+            for(size_t idx = 0; idx < info.elements.size(); idx++) {
+                causalNum_t theirVersion = info.versions.at(idx);
+                causalNum_t theirRound = info.rounds.at(idx);
+
+                causalNum_t ourVersion = AgreementInformation_vec.at(info.elements.at(idx)).get_version();
+                causalNum_t ourRound = AgreementInformation_vec.at(info.elements.at(idx)).get_round();
+
+                if(nearbyElements.count(info.elements.at(idx)==1)) {
+                    if(theirVersion > ourVersion || (theirVersion == ourVersion && theirRound > ourRound)) {
+                        // NS_LOG_INFO("" << info.senderId << " saw a better node for nearby element " << unsigned(info.elements.at(idx)));
+                        queueBeginAgreement = true;
+                        agree.push_back(info.elements.at(idx));
+                    }
+                }
+                thisNode.versionRoundNumbers.at(info.elements.at(idx)) = std::pair<causalNum_t, causalNum_t>(theirVersion, theirRound);
+            }
+            localGroup.insert_or_assign(info.senderId, thisNode);
+            if(queueBeginAgreement) {
+                for(auto elem : agree) {
+                    BeginAgreement(elem);
+                }
+            }
+        }
+        else if(buffer[0] == REQUEST_DATA) {
+            NS_LOG_INFO("Received data request");
+            REQUEST_DATA_Message info = REQUEST_DATA_Message::deserialize(&vectorized_buffer);
+            Ipv4Address address = localGroup.at(info.senderId).address;
+            SendData(address, info.elementId);
+        }
+        else if(buffer[0] == SEND_DATA) { 
+            NS_LOG_INFO("Received data");
+            SEND_DATA_Message info = SEND_DATA_Message::deserialize(&vectorized_buffer);
+
+            AgreementInformation *elementInfo = &AgreementInformation_vec.at(info.elementId);
+
+            std::set<nodeId_t> agreeset(info.sync_group.begin(), info.sync_group.end());
+            elementInfo->set_version(info.version);
+            elementInfo->set_round(info.round);
+            if(agreeset.count(node_id) == 0) {
+                elementInfo->set_round(elementInfo->get_round()+1);
+            }
+            agreeset.insert(node_id);
+            elementInfo->set_agreeingNodes(&agreeset);
+            std::pair<location_t, location_t> tmp(info.xpos, info.ypos);
+            elementInfo->set_fineLocation(&tmp);
+            
+            Ipv4Address address = localGroup.at(info.senderId).address;
+            SendACK(address, info.elementId);
+        }
+        else if(buffer[0] == ACK) {
+            NS_LOG_INFO("Received ACK");
+            ACK_Message info = ACK_Message::deserialize(&vectorized_buffer);
+             
+            AgreementInformation *elementInfo = &AgreementInformation_vec.at(info.elementId);
+            if(elementInfo->count_agreeingNodes(info.senderId) == false) {
+                elementInfo->set_round(elementInfo->get_round()+1);
+                elementInfo->add_agreeingNodes(info.senderId);
+            }
+        }
+        else {
+            NS_LOG_INFO("INVALID MESSAGE");
+        }   
     }
 
     // This should be triggered by adding it to the simulator schedule as in line 23
@@ -483,65 +631,53 @@ private:
         uint32_t ipv4_num = address.Get();
         ADVERT_Message adv(node_id, ipv4_num, &nearbyElements, &AgreementInformation_vec);
         
-        NS_LOG_INFO(adv);
+        // NS_LOG_INFO(adv);
         std::vector<uint8_t> mesg = adv.serialize();
-
         Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
         clientSocket->Send(packet);
-
         sendEvent = Simulator::Schedule(Time("1s"), &EdgeAwareClientApplication::SendAdvertisement, this);
-    }
-
-    /* SETTLE LOCAL GROUPS FIRST */
-    void BeginAgreement(elementId_t element) {
-        //if there is an edge server
-        //      SendDataRequest to edge server address
-        //      we can model an edge server as a node that doesn't move (similar to the access point). otherwise its application code can be the same
-        //if there is no edge server, but there is a local group
-        //otherwise
-        //      set element round number to 1
     }
     
     void SendDataRequest(Ipv4Address address, elementId_t elementId) {
         REQUEST_DATA_Message req(node_id, elementId);
         
         std::vector<uint8_t> mesg = req.serialize();
-        Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
-        // we need to set up client sockets properly to use the received IP addresses
-        // we can setup and teardown a connection immediately in this method if we have the receiver nodes ip address and TCP port (data exchange happens over a reliable channel)
+        Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
         clientSocket->Send(packet);
+
     }
 
     void SendData(Ipv4Address address, elementId_t elementId) {
         AgreementInformation elem = AgreementInformation_vec.at(elementId);
-        location_t xpos = elem.fineLocation.first;
-        location_t ypos = elem.fineLocation.second;
-        causalNum_t version = elem.versionNumber;
-        causalNum_t round = elem.roundNumber;
-        std::set<nodeId_t> *sync = &elem.agreeingNodes;
+        std::set<nodeId_t> sync = elem.get_agreeingNodes();
 
-        SEND_DATA_Message send(node_id, elementId, xpos, ypos, version, round, sync);
+        SEND_DATA_Message send(
+                node_id,
+                elementId,
+                elem.get_fineLocation().first,
+                elem.get_fineLocation().second,
+                elem.get_version(),
+                elem.get_round(),
+                &sync);
         
         std::vector<uint8_t> mesg = send.serialize();
-        Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
-        // see above
+        Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
         clientSocket->Send(packet);
     }
 
-    // WIP
-    void SendACK(Ipv4Address address) { 
-        std::vector<uint8_t> mesg{ACK}; 
-        Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
-        // see above
+    void SendACK(Ipv4Address address, elementId_t elementId) {
+        ACK_Message ack(node_id, elementId);
+        
+        std::vector<uint8_t> mesg = ack.serialize();
+        Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
         clientSocket->Send(packet);
-    }  
+    }
 
     Ptr<Socket> clientSocket;
-    EventId sendEvent;
+    EventId sendEvent, checkNearbyElements, pruneLocalGroup;
     Address destination;
     DataRate m_dataRate;
     Ptr<Socket> recvSocket;
-    // I'm not too familiar with callbacks in c++, but if possible we should not keep these as global state so that we can handle concurrency better
     std::vector<AgreementInformation> AgreementInformation_vec;
     std::set<elementId_t> nearbyElements;
     // this data structure indexes by node id, and stores IPv4 address (as a string) as well as local time
@@ -563,15 +699,14 @@ int main(int argc, char *argv[]) {
     NodeContainer nodes;
     nodes.Create(2);  
 
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
-    p2p.SetChannelAttribute("Delay", StringValue("2ms"));
+    // PointToPointHelper p2p;
+    // p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
+    // p2p.SetChannelAttribute("Delay", StringValue("2ms"));
 
     // Setup wifi channels
     YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
     YansWifiPhyHelper phy;
     phy.SetChannel(channel.Create());
-
 
     // Setup wifi ssid nodes
     WifiMacHelper mac;
@@ -580,7 +715,7 @@ int main(int argc, char *argv[]) {
     WifiHelper wifi;
 
     NetDeviceContainer devices;
-    mac.SetType("ns3::ApWifiMac", "Ssid", SsidValue(ssid));
+    mac.SetType("ns3::AdhocWifiMac", "Ssid", SsidValue(ssid));
     devices = wifi.Install(phy, mac, nodes);
 
 
@@ -590,8 +725,8 @@ int main(int argc, char *argv[]) {
     // NetDeviceContainer devices;
     // devices = p2p.Install(nodes);
 
-    // InternetStackHelper internet;
-    // internet.Install(nodes);
+    InternetStackHelper internet;
+    internet.Install(nodes);
     
     // IP address assignment 
     Ipv4AddressHelper address;
@@ -616,43 +751,22 @@ int main(int argc, char *argv[]) {
     Address client2Address(InetSocketAddress(interfaces.GetAddress(1), port));
 
     MobilityHelper mobility;
+    auto positions = CreateObject<RandomRectanglePositionAllocator>();
+  
+    // change this seed when necessary 
+    RngSeedManager::SetSeed(1); 
+    auto unif_rv = CreateObject<UniformRandomVariable>();
+    unif_rv->SetAttribute("Min", DoubleValue(0));
+    unif_rv->SetAttribute("Max", DoubleValue(20));
 
-    mobility.SetPositionAllocator("ns3::GridPositionAllocator",
-                                  "MinX",
-                                  DoubleValue(0.0),
-                                  "MinY",
-                                  DoubleValue(0.0),
-                                  "DeltaX",
-                                  DoubleValue(5.0),
-                                  "DeltaY",
-                                  DoubleValue(10.0),
-                                  "GridWidth",
-                                  UintegerValue(3),
-                                  "LayoutType",
-                                  StringValue("RowFirst"));
+    positions->SetX(unif_rv);
+    positions->SetY(unif_rv);
 
-    mobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    mobility.Install(nodes.Get(0));
+    mobility.SetPositionAllocator(positions);
 
-    MobilityHelper mobility2;
-
-    mobility2.SetPositionAllocator("ns3::GridPositionAllocator",
-                                  "MinX",
-                                  DoubleValue(0.0),
-                                  "MinY",
-                                  DoubleValue(0.0),
-                                  "DeltaX",
-                                  DoubleValue(-5.0),
-                                  "DeltaY",
-                                  DoubleValue(10.0),
-                                  "GridWidth",
-                                  UintegerValue(3),
-                                  "LayoutType",
-                                  StringValue("RowFirst"));
-    mobility2.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    mobility2.Install(nodes.Get(1));
-
-    
+    mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    mobility.Install(nodes);
+ 
     clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
     nodes.Get(0)->AddApplication(clientApp1);
     clientApp1->SetStartTime(Seconds(1.0));
@@ -670,14 +784,15 @@ int main(int argc, char *argv[]) {
     nodes.Get(1)->AddApplication(clientApp2);
     clientApp2->SetStartTime(Seconds(1.0));
     clientApp2->SetStopTime(Seconds(10.0));
-    Simulator::Stop(Seconds(10.0));
+    // simulator now end late so that the applications can dump state
+    Simulator::Stop(Seconds(11.0));
     clientApp2->triggerReceive();
     // Enable global static routing
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-
-
+    
     phy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
     phy.EnablePcap("edge-aware", devices);
+
     // Run simulation
     Simulator::Run();
     Simulator::Destroy();
