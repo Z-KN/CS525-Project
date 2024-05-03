@@ -30,6 +30,11 @@ typedef uint8_t causalNum_t;
 typedef uint32_t nodeId_t;
 typedef float location_t;
 
+static const ns3::InetSocketAddress kBeaconBroadcast =
+ns3::InetSocketAddress(
+ns3::Ipv4Address("255.255.255.255"),
+80);
+
 // EVAN Addition >>>
 class AgreementInformation {
 public: 
@@ -695,8 +700,10 @@ int main(int argc, char *argv[]) {
     LogComponentEnable("Peers", LOG_LEVEL_INFO);
     // CommandLine cmd;
     // cmd.Parse(argc, argv);
-
+    const static int num_nodes = 2;
     NodeContainer nodes;
+    Ptr<ns3::Socket> beacon_sinks[num_nodes];
+    Ptr<ns3::Socket> beacon_sources[num_nodes];
     nodes.Create(2);  
 
     // PointToPointHelper p2p;
@@ -707,6 +714,10 @@ int main(int argc, char *argv[]) {
     YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
     YansWifiPhyHelper phy;
     phy.SetChannel(channel.Create());
+
+    // Add propoagation loss and delay
+    channel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+    channel.AddPropagationLoss("ns3::LogDistancePropagationLossModel");
 
     // Setup wifi ssid nodes
     WifiMacHelper mac;
@@ -734,6 +745,19 @@ int main(int argc, char *argv[]) {
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
 
+
+    for (int n = 0; n < num_nodes; n++) {
+        // beacon_sink on every node
+        beacon_sinks[n] =
+        ns3::Socket::CreateSocket(nodes.Get(n), TypeId::LookupByName("ns3::UdpSocketFactory"));
+
+        beacon_sinks[n]->Bind(InetSocketAddress(interfaces.GetAddress(n), 80));
+
+        beacon_sources[n] = ns3::Socket::CreateSocket(nodes.Get(n),TypeId::LookupByName("ns3::UdpSocketFactory"));
+        beacon_sources[n]->SetAllowBroadcast(true);
+
+    }
+
     // uint16_t port = 9; 
 
     // EVAN: you don't have to iterate over everything yourself, the helpers can take a lost of nodes and install
@@ -743,6 +767,7 @@ int main(int argc, char *argv[]) {
     Ptr<EdgeAwareClientApplication> clientApp1 = CreateObject<EdgeAwareClientApplication>();
     Ptr<Socket> UdpSocket = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
     Ptr<Socket> UdpSocketRecv = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
+    UdpSocket -> SetAllowBroadcast(true);
 
     UdpSocketRecv -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
     
@@ -766,8 +791,17 @@ int main(int argc, char *argv[]) {
 
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(nodes);
+
+    // change the velocity and model:
+    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel = nodes.Get(0)->GetObject<ConstantVelocityMobilityModel>();
+    // nodeMobilityModel->SetVelocity(Vector(speed, 0, 0));
+
+    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel2 = nodes.Get(1)->GetObject<ConstantVelocityMobilityModel>();
+    // nodeMobilityModel2->SetVelocity(Vector(-speed, 0, 0));
+
+    
  
-    clientApp1->Setup(UdpSocket, UdpSocketRecv, client2Address); // setup connection to 1st node
+    clientApp1->Setup(UdpSocket, UdpSocketRecv, kBeaconBroadcast); // setup connection to 1st node
     nodes.Get(0)->AddApplication(clientApp1);
     clientApp1->SetStartTime(Seconds(1.0));
     clientApp1->SetStopTime(Seconds(10.0));
@@ -777,10 +811,11 @@ int main(int argc, char *argv[]) {
     Ptr<EdgeAwareClientApplication> clientApp2 = CreateObject<EdgeAwareClientApplication>();
     Ptr<Socket> UdpSocket2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
     Ptr<Socket> UdpSocketRecv2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
+    UdpSocket2 -> SetAllowBroadcast(true);
     UdpSocketRecv2 -> Bind(InetSocketAddress(interfaces.GetAddress(1), 8080));
 
 
-    clientApp2->Setup(UdpSocket2, UdpSocketRecv2, client1Address); // setup connection to 0th node
+    clientApp2->Setup(UdpSocket2, UdpSocketRecv2, kBeaconBroadcast); // setup connection to 0th node
     nodes.Get(1)->AddApplication(clientApp2);
     clientApp2->SetStartTime(Seconds(1.0));
     clientApp2->SetStopTime(Seconds(10.0));
