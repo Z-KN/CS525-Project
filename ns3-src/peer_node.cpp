@@ -30,10 +30,8 @@ typedef uint8_t causalNum_t;
 typedef uint32_t nodeId_t;
 typedef float location_t;
 
-static const ns3::InetSocketAddress kBeaconBroadcast =
-ns3::InetSocketAddress(
-ns3::Ipv4Address("255.255.255.255"),
-80);
+
+InetSocketAddress BeaconBroadcastAddress = InetSocketAddress(Ipv4Address::GetBroadcast(), 80);
 
 // EVAN Addition >>>
 class AgreementInformation {
@@ -68,9 +66,9 @@ public:
     friend std::ostream& operator<< (std::ostream &os, AgreementInformation &a) {
         os << "Version: " << unsigned(a.versionNumber) << "\nRound: " << unsigned(a.roundNumber)  << std::endl;
         os << "Location: (" << a.fineLocation.first << ", " << a.fineLocation.second << ")\n";
-        os << "Synchronized Nodes:\n";
+        os << "Synchronized Nodes: ";
         for(nodeId_t elem : a.agreeingNodes) {
-            os << elem << std::endl;
+            os << elem << " ";
         }
 
         return os;
@@ -377,22 +375,17 @@ public:
    
     uint32_t heartbeatTimeout = 10000;
 
-    void Setup(Ptr<Socket> socket, Ptr<Socket> recvSocket_,  Address address) {
-        clientSocket = socket;
-        destination = address;
-        recvSocket = recvSocket_;
-        // clientSocket -> Bind();
-
-        // NS_LOG_INFO(clientSocket->Connect(address));
-    }
-
-    void triggerReceive() {
-        recvSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
-    }
-
-    void onAccept(Ptr<Socket> s, const Address& from) {
-        NS_LOG_INFO("Accepted connection");
-        s->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
+    void Setup(Ptr<Socket> dataSendSocket_, 
+                Ptr<Socket> dataRecvSocket_, 
+                Ptr<Socket> broadcastSendSocket_,
+                Ptr<Socket> broadcastRecvSocket_) 
+    {
+        dataSendSocket = dataSendSocket_;
+        dataRecvSocket = dataRecvSocket_;
+        broadcastSendSocket = broadcastSendSocket_;
+        broadcastRecvSocket = broadcastRecvSocket_;
+        broadcastRecvSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));    
+        dataRecvSocket->SetRecvCallback(MakeCallback(&EdgeAwareClientApplication::ReceiveData, this));
     }
 
     // All the setup for the ports and sockets done here
@@ -401,50 +394,29 @@ public:
         node_id = node->GetId();
 
         auto unif_rv = CreateObject<UniformRandomVariable>(); 
-        unif_rv->SetAttribute("Min", DoubleValue(-1.0));
-        unif_rv->SetAttribute("Max", DoubleValue(1.0));
+        unif_rv->SetAttribute("Min", DoubleValue(-0.5));
+        unif_rv->SetAttribute("Max", DoubleValue(0.5));
  
-        // array of element positions, indexed by element id.
-        // the magic numbers aren't great, but we can focus on cleaning that up later
-        // they can be changed to be reasonable regarding how the mobility client organizes
-        // (via setPositionAllocator)
-
-        auto gps_noise = CreateObject<UniformRandomVariable>();
-        gps_noise->SetAttribute("Min", DoubleValue(-1));
-        unif_rv->SetAttribute("Max", DoubleValue(1));
-
         std::vector<std::pair<location_t, location_t>> baseElementLocations{
-            {5.0f, 11.0f},
-            {2.0f, 8.0f},
-            {6.0f, 13.0f},
-            {10.0f, 18.0f},
-            {12.0f, 5.0f}
+            {2.5f, 5.5f},
+            {1.0f, 4.0f},
+            {3.0f, 6.5f},
+            {5.0f, 9.0f},
+            {6.0f, 2.5f}
         };
         for(auto &elem : baseElementLocations) {
             elem = std::pair<location_t, location_t>(elem.first + unif_rv->GetValue(), elem.second + unif_rv->GetValue());
         }
         
-        // each node intitializes their element table, along with noisy versions of the positions
         for(std::pair<location_t, location_t> &element : baseElementLocations) {
             AgreementInformation_vec.push_back(AgreementInformation(&element, node_id));
         } 
-
-        recvSocket->Listen();
-        recvSocket->SetAcceptCallback (
-            MakeNullCallback<bool, Ptr<Socket>, const Address &> (),
-            MakeCallback (&EdgeAwareClientApplication::onAccept, this));
-
-        // clientSocket = Socket::CreateSocket(node, UdpSocketFactory::GetTypeId());
-        // clientSocket->Bind(InetSocketAddress(Ipv4Address::GetAny(), 63031));
-        // clientSocket->Bind();
-        clientSocket->Bind();
-        clientSocket->Connect(destination);
-        
-
+ 
         NS_LOG_INFO("Starting state for node " << node_id << ": ");
         for(auto elem : AgreementInformation_vec) {
             NS_LOG_INFO(elem);
         }
+        NS_LOG_INFO("");
 
         sendEvent = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::SendAdvertisement, this);
         pruneLocalGroup = Simulator::Schedule(Seconds(3), &EdgeAwareClientApplication::CheckHeartbeats, this);
@@ -457,6 +429,7 @@ public:
         for(auto elem : AgreementInformation_vec) {
             NS_LOG_INFO(elem);
         }
+        NS_LOG_INFO("");
     }
 
 private:
@@ -483,7 +456,6 @@ private:
         checkNearbyElements = Simulator::Schedule(Seconds(1), &EdgeAwareClientApplication::GetNearbyElements, this);   
     }
  
-    /* SETTLE LOCAL GROUPS FIRST */
     void BeginAgreement(elementId_t element) {
         causalNum_t ourVersion = AgreementInformation_vec.at(element).get_version();
         causalNum_t ourRound = AgreementInformation_vec.at(element).get_round();
@@ -492,7 +464,7 @@ private:
         causalNum_t maxRound = 0;
         nodeId_t bestNode = UINT32_MAX;
         bool no_version = AgreementInformation_vec.at(element).get_round() == 0;
-
+        NS_LOG_INFO("node " << node_id << " is beginning agreement");
         if(!localGroup.empty()) {
             for(auto node : localGroup) {       
                 uint32_t theirVersion = node.second.versionRoundNumbers.at(element).first;
@@ -505,27 +477,22 @@ private:
                 }
             }
             if(ourVersion < maxVersion || (ourVersion == maxVersion && ourRound < maxRound)) {
-                // NS_LOG_INFO("replacement found for element " << unsigned(element) << " from node " << bestNode);
+                NS_LOG_INFO("replacement found for element " << unsigned(element) << " from node " << bestNode);
                 SendDataRequest(localGroup.at(bestNode).address, element);
             }
             else {
-                // NS_LOG_INFO("replacement not found for element " << unsigned(element));
+                NS_LOG_INFO("replacement not found for element " << unsigned(element));
                 if(no_version) {
-
-                    auto unif_rv = CreateObject<UniformRandomVariable>();
-                    unif_rv->SetAttribute("Min", DoubleValue(1));
-                    unif_rv->SetAttribute("Max", DoubleValue(10));
-                    AgreementInformation_vec.at(element).set_round((causalNum_t)(unif_rv->GetInteger()));
+                    AgreementInformation_vec.at(element).set_round(node_id+1);
+                    NS_LOG_INFO("initialized to " << (node_id+1));
                 }
             }
         }
         else {
-            // NS_LOG_INFO("element found, empty local group");
+            NS_LOG_INFO("found " << unsigned(element) << " but, empty local group");
             if(no_version) {
-                auto unif_rv = CreateObject<UniformRandomVariable>();
-                unif_rv->SetAttribute("Min", DoubleValue(1));
-                unif_rv->SetAttribute("Max", DoubleValue(10));
-                AgreementInformation_vec.at(element).set_round((causalNum_t)(unif_rv->GetInteger()));
+                AgreementInformation_vec.at(element).set_round(node_id+1);
+                NS_LOG_INFO("initialized to " << (node_id+1));
             }
         }
     }
@@ -557,9 +524,9 @@ private:
         // because of how we serialize, the first byte is the message type 
         std::vector<uint8_t> vectorized_buffer(buffer, buffer + sizeof(buffer)/sizeof(buffer[0])); 
         if(buffer[0] == ADVERT) {
-            NS_LOG_INFO("Received advertisement");
+            //NS_LOG_INFO("Received advertisement");
             ADVERT_Message info = ADVERT_Message::deserialize(&vectorized_buffer);
-            // NS_LOG_INFO(info);
+            //NS_LOG_INFO(info);
             nodeEntry thisNode(Ipv4Address(info.ipv4Address), Simulator::Now().GetMilliSeconds());
             bool queueBeginAgreement = false;
             std::vector<elementId_t> agree;
@@ -571,9 +538,9 @@ private:
                 causalNum_t ourVersion = AgreementInformation_vec.at(info.elements.at(idx)).get_version();
                 causalNum_t ourRound = AgreementInformation_vec.at(info.elements.at(idx)).get_round();
 
-                if(nearbyElements.count(info.elements.at(idx)==1)) {
+                if(nearbyElements.count(info.elements.at(idx))==1) {
                     if(theirVersion > ourVersion || (theirVersion == ourVersion && theirRound > ourRound)) {
-                        // NS_LOG_INFO("" << info.senderId << " saw a better node for nearby element " << unsigned(info.elements.at(idx)));
+                        NS_LOG_INFO("node " << node_id << " saw " << info.senderId << ", a better node for nearby element " << unsigned(info.elements.at(idx)));
                         queueBeginAgreement = true;
                         agree.push_back(info.elements.at(idx));
                     }
@@ -588,13 +555,13 @@ private:
             }
         }
         else if(buffer[0] == REQUEST_DATA) {
-            NS_LOG_INFO("Received data request");
+            //NS_LOG_INFO("Received data request");
             REQUEST_DATA_Message info = REQUEST_DATA_Message::deserialize(&vectorized_buffer);
             Ipv4Address address = localGroup.at(info.senderId).address;
             SendData(address, info.elementId);
         }
         else if(buffer[0] == SEND_DATA) { 
-            NS_LOG_INFO("Received data");
+            //NS_LOG_INFO("Received data");
             SEND_DATA_Message info = SEND_DATA_Message::deserialize(&vectorized_buffer);
 
             AgreementInformation *elementInfo = &AgreementInformation_vec.at(info.elementId);
@@ -614,7 +581,7 @@ private:
             SendACK(address, info.elementId);
         }
         else if(buffer[0] == ACK) {
-            NS_LOG_INFO("Received ACK");
+            // NS_LOG_INFO("Received ACK");
             ACK_Message info = ACK_Message::deserialize(&vectorized_buffer);
              
             AgreementInformation *elementInfo = &AgreementInformation_vec.at(info.elementId);
@@ -632,14 +599,13 @@ private:
     void SendAdvertisement() {
         Ptr<Ipv4> ipv4 = GetNode()->GetObject<Ipv4>();
         Ipv4Address address = ipv4->GetAddress(1, 0).GetLocal();
-        // NS_LOG_INFO("Sending advertisement");
         uint32_t ipv4_num = address.Get();
         ADVERT_Message adv(node_id, ipv4_num, &nearbyElements, &AgreementInformation_vec);
         
-        // NS_LOG_INFO(adv);
+        //NS_LOG_INFO(adv);
         std::vector<uint8_t> mesg = adv.serialize();
         Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
-        clientSocket->Send(packet);
+        broadcastSendSocket->Send(packet);
         sendEvent = Simulator::Schedule(Time("1s"), &EdgeAwareClientApplication::SendAdvertisement, this);
     }
     
@@ -648,8 +614,8 @@ private:
         
         std::vector<uint8_t> mesg = req.serialize();
         Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
-        clientSocket->Send(packet);
-
+        dataSendSocket->SendTo(packet, 0, InetSocketAddress(address, 8080));
+        //NS_LOG_INFO(gunk);
     }
 
     void SendData(Ipv4Address address, elementId_t elementId) {
@@ -667,7 +633,7 @@ private:
         
         std::vector<uint8_t> mesg = send.serialize();
         Ptr<Packet> packet = Create<Packet>(mesg.data(), mesg.size());
-        clientSocket->Send(packet);
+        dataSendSocket->SendTo(packet, 0, InetSocketAddress(address, 8080));
     }
 
     void SendACK(Ipv4Address address, elementId_t elementId) {
@@ -675,22 +641,16 @@ private:
         
         std::vector<uint8_t> mesg = ack.serialize();
         Ptr<Packet> packet = Create<Packet>((uint8_t*)mesg.data(), sizeof(mesg.data()));
-        clientSocket->Send(packet);
+        dataSendSocket->SendTo(packet, 0, InetSocketAddress(address, 8080));
     }
 
-    Ptr<Socket> clientSocket;
+    Ptr<Socket> dataSendSocket, dataRecvSocket, broadcastSendSocket, broadcastRecvSocket;
     EventId sendEvent, checkNearbyElements, pruneLocalGroup;
-    Address destination;
-    DataRate m_dataRate;
-    Ptr<Socket> recvSocket;
     std::vector<AgreementInformation> AgreementInformation_vec;
     std::set<elementId_t> nearbyElements;
-    // this data structure indexes by node id, and stores IPv4 address (as a string) as well as local time
-    // due to how this system works, only the local group entry is modified by heartbeat. therefore it needs to contain a lot of information
     std::map<nodeId_t, nodeEntry> localGroup;
     nodeId_t node_id;
-}; // This is a copy of the server application, but needs to be edited to replicate the other behavior
-
+}; 
 
 void TracePackets(Ptr<const Packet> packet) {
     NS_LOG_INFO("Packet trace - Received packet at node: " << Simulator::Now().GetSeconds());
@@ -700,81 +660,100 @@ int main(int argc, char *argv[]) {
     LogComponentEnable("Peers", LOG_LEVEL_INFO);
     // CommandLine cmd;
     // cmd.Parse(argc, argv);
-    const static int num_nodes = 2;
+    const static int num_nodes = 3;
     NodeContainer nodes;
-    Ptr<ns3::Socket> beacon_sinks[num_nodes];
-    Ptr<ns3::Socket> beacon_sources[num_nodes];
-    nodes.Create(2);  
-
-    // PointToPointHelper p2p;
-    // p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
-    // p2p.SetChannelAttribute("Delay", StringValue("2ms"));
-
-    // Setup wifi channels
-    YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
-    YansWifiPhyHelper phy;
-    phy.SetChannel(channel.Create());
-
-    // Add propoagation loss and delay
-    channel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    channel.AddPropagationLoss("ns3::LogDistancePropagationLossModel");
-
-    // Setup wifi ssid nodes
-    WifiMacHelper mac;
-    Ssid ssid = Ssid("clients");
-
+    nodes.Create(num_nodes); 
+   
     WifiHelper wifi;
+    wifi.SetStandard(WIFI_STANDARD_80211b);
+    std::string phyMode("DsssRate1Mbps");
+    Config::SetDefault("ns3::WifiRemoteStationManager::NonUnicastMode", StringValue(phyMode));
+
+    YansWifiPhyHelper wifiPhy;
+    // This is one parameter that matters when using FixedRssLossModel
+    // set it to zero; otherwise, gain will be added
+    wifiPhy.Set("RxGain", DoubleValue(0));
+    // ns-3 supports RadioTap and Prism tracing extensions for 802.11b
+    wifiPhy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
+  
+    YansWifiChannelHelper wifiChannel;
+    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+    // The below FixedRssLossModel will cause the rss to be fixed regardless
+    // of the distance between the two stations, and the transmit power
+    wifiChannel.AddPropagationLoss("ns3::LogDistancePropagationLossModel");
+    wifiPhy.SetChannel(wifiChannel.Create());
+  
+    // Add a mac and disable rate control
+    WifiMacHelper wifiMac;
+    wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager",
+                                   "DataMode",
+                                   StringValue(phyMode),
+                                   "ControlMode",
+                                   StringValue(phyMode));
+    // Set it to adhoc mode
+    wifiMac.SetType("ns3::AdhocWifiMac");
+    NetDeviceContainer devices = wifi.Install(wifiPhy, wifiMac, nodes);
+/*
+    PointToPointHelper p2p;
+    p2p.SetDeviceAttribute("DataRate", StringValue("10Mbps"));
+    p2p.SetChannelAttribute("Delay", StringValue("2ms"));
 
     NetDeviceContainer devices;
-    mac.SetType("ns3::AdhocWifiMac", "Ssid", SsidValue(ssid));
-    devices = wifi.Install(phy, mac, nodes);
-
-
+    devices = p2p.Install(nodes);
+    NS_LOG_INFO("Testing");
+*/
     InternetStackHelper stack;
-
     stack.Install(nodes);
-    // NetDeviceContainer devices;
-    // devices = p2p.Install(nodes);
-
-    InternetStackHelper internet;
-    internet.Install(nodes);
-    
-    // IP address assignment 
+ 
+    // IP address assignment to the above interface
     Ipv4AddressHelper address;
     address.SetBase("10.1.1.0", "255.255.255.0"); 
     Ipv4InterfaceContainer interfaces = address.Assign(devices);
 
+    // Temporary way to do it but we can do a loop for each node or we can write a helper
+    Ptr<EdgeAwareClientApplication> ClientApps[num_nodes];
+    Ptr<Socket> UdpDataSendSockets[num_nodes];
+    Ptr<Socket> UdpDataRecvSockets[num_nodes];
+    Ptr<Socket> UdpBeaconSinks[num_nodes];
+    Ptr<Socket> UdpBeaconSources[num_nodes];
 
+    TypeId tid = TypeId::LookupByName("ns3::UdpSocketFactory");
 
     for (int n = 0; n < num_nodes; n++) {
+        // each client needs an application
+        ClientApps[n] = CreateObject<EdgeAwareClientApplication>();
+
+        UdpDataRecvSockets[n] = Socket::CreateSocket(nodes.Get(n), tid);
+        UdpDataRecvSockets[n]->Bind(InetSocketAddress(interfaces.GetAddress(n), 8080));
+
         // beacon_sink on every node
-        beacon_sinks[n] =
-        ns3::Socket::CreateSocket(nodes.Get(n), TypeId::LookupByName("ns3::UdpSocketFactory"));
+        UdpBeaconSinks[n] = Socket::CreateSocket(nodes.Get(n), tid);
+        UdpBeaconSinks[n]->Bind(InetSocketAddress(Ipv4Address::GetAny(), 80));
 
-        beacon_sinks[n]->Bind(InetSocketAddress(interfaces.GetAddress(n), 80));
+        UdpDataSendSockets[n] = Socket::CreateSocket(nodes.Get(n), tid);
 
-        beacon_sources[n] = ns3::Socket::CreateSocket(nodes.Get(n),TypeId::LookupByName("ns3::UdpSocketFactory"));
-        beacon_sources[n]->SetAllowBroadcast(true);
+        // beacon source on every node
+        UdpBeaconSources[n] = Socket::CreateSocket(nodes.Get(n), tid);
+        UdpBeaconSources[n]->SetAllowBroadcast(true);
+        UdpBeaconSources[n]->Connect(BeaconBroadcastAddress);        
 
+        ClientApps[n]->Setup(UdpDataSendSockets[n], UdpDataRecvSockets[n], UdpBeaconSources[n], UdpBeaconSinks[n]);
+        auto unif_rv = CreateObject<UniformRandomVariable>();
+        unif_rv->SetAttribute("Min", DoubleValue(0));
+        unif_rv->SetAttribute("Max", DoubleValue(1));
+        ClientApps[n]->SetStartTime(Seconds(unif_rv->GetValue()));
+        ClientApps[n]->SetStopTime(Seconds(13.0));
+        
+        nodes.Get(n)->AddApplication(ClientApps[n]);
     }
 
-    // uint16_t port = 9; 
+    // change the velocity and model:
+    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel = nodes.Get(0)->GetObject<ConstantVelocityMobilityModel>();
+    // nodeMobilityModel->SetVelocity(Vector(speed, 0, 0));
 
-    // EVAN: you don't have to iterate over everything yourself, the helpers can take a lost of nodes and install
-    // things for you
-
-    // Temporary way to do it but we can do a loop for each node or we can write a helper
-    Ptr<EdgeAwareClientApplication> clientApp1 = CreateObject<EdgeAwareClientApplication>();
-    Ptr<Socket> UdpSocket = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
-    Ptr<Socket> UdpSocketRecv = Socket::CreateSocket(nodes.Get(0), UdpSocketFactory::GetTypeId());
-    UdpSocket -> SetAllowBroadcast(true);
-
-    UdpSocketRecv -> Bind(InetSocketAddress(interfaces.GetAddress(0), 8080));
+    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel2 = nodes.Get(1)->GetObject<ConstantVelocityMobilityModel>();
+    // nodeMobilityModel2->SetVelocity(Vector(-speed, 0, 0));
     
-    uint16_t port = 8080;
-    Address client1Address(InetSocketAddress(interfaces.GetAddress(0), port));
-    Address client2Address(InetSocketAddress(interfaces.GetAddress(1), port));
-
     MobilityHelper mobility;
     auto positions = CreateObject<RandomRectanglePositionAllocator>();
   
@@ -782,7 +761,7 @@ int main(int argc, char *argv[]) {
     RngSeedManager::SetSeed(1); 
     auto unif_rv = CreateObject<UniformRandomVariable>();
     unif_rv->SetAttribute("Min", DoubleValue(0));
-    unif_rv->SetAttribute("Max", DoubleValue(20));
+    unif_rv->SetAttribute("Max", DoubleValue(10));
 
     positions->SetX(unif_rv);
     positions->SetY(unif_rv);
@@ -791,47 +770,19 @@ int main(int argc, char *argv[]) {
 
     mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     mobility.Install(nodes);
-
-    // change the velocity and model:
-    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel = nodes.Get(0)->GetObject<ConstantVelocityMobilityModel>();
-    // nodeMobilityModel->SetVelocity(Vector(speed, 0, 0));
-
-    // Ptr<ConstantVelocityMobilityModel> nodeMobilityModel2 = nodes.Get(1)->GetObject<ConstantVelocityMobilityModel>();
-    // nodeMobilityModel2->SetVelocity(Vector(-speed, 0, 0));
-
     
- 
-    clientApp1->Setup(UdpSocket, UdpSocketRecv, kBeaconBroadcast); // setup connection to 1st node
-    nodes.Get(0)->AddApplication(clientApp1);
-    clientApp1->SetStartTime(Seconds(1.0));
-    clientApp1->SetStopTime(Seconds(10.0));
-
-    clientApp1->triggerReceive();
-
-    Ptr<EdgeAwareClientApplication> clientApp2 = CreateObject<EdgeAwareClientApplication>();
-    Ptr<Socket> UdpSocket2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
-    Ptr<Socket> UdpSocketRecv2 = Socket::CreateSocket(nodes.Get(1), UdpSocketFactory::GetTypeId());
-    UdpSocket2 -> SetAllowBroadcast(true);
-    UdpSocketRecv2 -> Bind(InetSocketAddress(interfaces.GetAddress(1), 8080));
-
-
-    clientApp2->Setup(UdpSocket2, UdpSocketRecv2, kBeaconBroadcast); // setup connection to 0th node
-    nodes.Get(1)->AddApplication(clientApp2);
-    clientApp2->SetStartTime(Seconds(1.0));
-    clientApp2->SetStopTime(Seconds(10.0));
-    // simulator now end late so that the applications can dump state
-    Simulator::Stop(Seconds(11.0));
-    clientApp2->triggerReceive();
+    // simulator now ends late so that the applications can dump state
+    Simulator::Stop(Seconds(14.0));
+    
     // Enable global static routing
     Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-    
-    phy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
-    phy.EnablePcap("edge-aware", devices);
+    // p2p.EnablePcapAll("peer-to-peer"); 
+    wifiPhy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
+    wifiPhy.EnablePcap("edge-aware", devices);
 
     // Run simulation
     Simulator::Run();
     Simulator::Destroy();
-
 
     return 0;
 }
