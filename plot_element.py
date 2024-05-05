@@ -6,7 +6,7 @@ convergence_times = np.zeros((9, 5))
 convergence_std = np.zeros(9)
 convergence_averages = np.zeros(9)
 total = 0
-for index, x in enumerate(x for x in range(3, 10, 2)):
+for index, x in enumerate(x for x in range(3, 20, 2)):
     for i in range(1, 6):
         with open(f'element_scale_logs/seed{i}-{x}element.out') as f:
             data = f.readlines()
@@ -26,7 +26,7 @@ acks_std = np.zeros(9)
 
 
 # COUNT NUMBER OF ACKS
-for index, x in enumerate(y for y in range(3, 10, 2)):
+for index, x in enumerate(y for y in range(3, 20, 2)):
     for i in range(1, 6):
         with open(f'element_scale_logs/seed{i}-{x}element.out') as f:
             data = f.readlines()
@@ -63,7 +63,7 @@ ax1.bar(x_axis, convergence_averages, .4, label="Time to Convergence", color=col
 # ax1.errorbar(elements, convergence_averages, yerr=convergence_std, fmt='o', color=color)
 ax1.tick_params(axis='y', labelcolor=color)
 # set y limits of the ax1's y-axis
-ax1.set_ylim(0, 20)
+ax1.set_ylim(0, 30)
 ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
 
 color = 'tab:blue'
@@ -72,7 +72,8 @@ ax2.set_ylabel('Number of ACKS', color=color)  # we already handled the x-label 
 # ax2.plot(elements, number_of_acks, color=color)
 ax2.bar(x_axis + .4, number_of_acks, .4, color=color, label="Number of Acks", yerr=acks_std, capsize=3)
 ax2.tick_params(axis='y', labelcolor=color)
+# set the difference between the two
 # set y limits of the ax2's y-axis
-ax2.set_ylim(0, 21)
+ax2.set_ylim(0, 60)
 fig.tight_layout() 
 plt.savefig('element_scaling.png')
