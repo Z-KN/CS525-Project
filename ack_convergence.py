@@ -50,7 +50,7 @@ print("Number of ACKs std:", acks_std)
 
 # Std deviation error bars here
 # plt.errorbar([3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25], convergence_averages, yerr=convergence_std, fmt='o')
-plt.title('Time to ACK convergence/Number of ACKs for different numbers of nodes')
+# plt.title('Time to ACK convergence/Number of ACKs for different numbers of nodes')
 
 x_axis = np.arange(len(nodes))
 plt.xticks(x_axis + .2, nodes)
@@ -62,6 +62,8 @@ ax1.set_ylabel('Time to convergence (s)', color=color)
 ax1.bar(x_axis, convergence_averages, .4, label="Time to Convergence", color=color, yerr=convergence_std, capsize=3, bottom=0)
 # ax1.errorbar(nodes, convergence_averages, yerr=convergence_std, fmt='o', color=color)
 ax1.tick_params(axis='y', labelcolor=color)
+# set y limits of the ax1's y-axis
+ax1.set_ylim(0, 30)
 ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
 
 color = 'tab:blue'
@@ -70,5 +72,7 @@ ax2.set_ylabel('Number of ACKS', color=color)  # we already handled the x-label 
 # ax2.plot(nodes, number_of_acks, color=color)
 ax2.bar(x_axis + .4, number_of_acks, .4, color=color, label="Number of Acks", yerr=acks_std, capsize=3)
 ax2.tick_params(axis='y', labelcolor=color)
+# set y limits of the ax2's y-axis
+ax2.set_ylim(0, 18)
 fig.tight_layout() 
 plt.savefig('ack_convergence.png')
