@@ -23,9 +23,12 @@ for index, x in enumerate(x for x in range(3, 26, 2)):
 
 print(convergence_std)
 plt.plot([3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25], convergence_averages)
+# x ticks
+plt.xticks([3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25])
 plt.errorbar([3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25], convergence_averages, yerr=convergence_std, fmt='o')
 plt.xlabel('Number of nodes')
 plt.ylabel('Time to convergence (s)')
-plt.title('Time to convergence for different numbers of nodes')
-plt.show()
-plt.savefig('convergence_plot.png')
+# plt.title('Time to convergence for different numbers of nodes')
+# plt.show()
+plt.tight_layout()
+plt.savefig('local_group.png')
